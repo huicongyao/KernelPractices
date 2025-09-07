@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 
-
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g -ggdb")
     message(STATUS "CMAKE_BUILD_TYPE = Debug")
@@ -41,3 +40,4 @@ add_executable(
 
 add_executable(gemm_tensor_core gemm_tensor_core.cu)
 add_executable(sigmoid sigmoid.cu)
+add_executable(histogram histogram.cu)

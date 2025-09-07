@@ -31,7 +31,7 @@ __global__ void SgemmWmma(const T* __restrict__ A, const T* __restrict__ B,
   wmma::fill_fragment(cFrag, 0.0f);
 
   for (int k0 = 0; k0 < K; k0 += 16) {
-    const T* A_sub = A + row * K + k0; 
+    const T* A_sub = A + row * K + k0;
     wmma::load_matrix_sync(aFrag, A_sub, /*leading_dim=*/K);
     const T* B_sub = B + k0 * N + col;
     wmma::load_matrix_sync(bFrag, B_sub, /*leading_dim=*/N);
@@ -53,7 +53,7 @@ void LaunchTensorCore(T* a, T* b, float* c, int M, int N, int K) {
 int main() {
   constexpr int M = 64;
   constexpr int N = 64;
-  constexpr int K = 32;
+  constexpr int K = 64;
 
   UnifiedPtr<nv_bfloat16> A(M * K, DEVICE::CUDA);
   UnifiedPtr<nv_bfloat16> B(K * N, DEVICE::CUDA);
@@ -68,8 +68,9 @@ int main() {
     for (int j = 0; j < N; j++) {
       if (C[i * N + j] != static_cast<float>(K)) {
         printf("Error at (%d, %d), %f vs %f\n", i, j, C[i * N + j], 1.0f);
+        return -1;
       }
     }
   }
-  printf("%d\n", C[10 * N + 10]);
+  return 0;
 }

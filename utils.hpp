@@ -5,10 +5,10 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <type_traits>
-#include <chrono>
 
 enum class DEVICE { CPU, CUDA };
 
@@ -44,7 +44,9 @@ struct ControlBlock {
 template <typename T>
 class UnifiedPtr {
   static_assert(std::is_trivially_copyable<T>::value,
-                "UnifiedPtr only supports trivially copyable types for safe GPU memory operations");
+                "UnifiedPtr only supports trivially copyable types for safe "
+                "GPU memory operations");
+
  private:
   ControlBlock<T>* control;
 
@@ -159,7 +161,7 @@ class UnifiedPtr {
     if (device == control->device) {
       return *this;
     }
-    if (device == DEVICE::CUDA || control->device == DEVICE::CPU) {
+    if (device == DEVICE::CUDA && control->device == DEVICE::CPU) {
       T* new_p = nullptr;
       cudaError_t err = cudaMallocManaged(&new_p, control->size * sizeof(T));
       if (err != cudaSuccess) {
@@ -170,7 +172,7 @@ class UnifiedPtr {
                  cudaMemcpyHostToDevice);
       delete[] control->ptr;
       control->ptr = new_p;
-    } else if (device == DEVICE::CPU || control->device == DEVICE::CUDA) {
+    } else if (device == DEVICE::CPU && control->device == DEVICE::CUDA) {
       T* new_p = new T[control->size];
       cudaMemcpy(new_p, control->ptr, control->size * sizeof(T),
                  cudaMemcpyDeviceToHost);
