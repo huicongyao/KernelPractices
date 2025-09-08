@@ -41,3 +41,4 @@ add_executable(
 add_executable(gemm_tensor_core gemm_tensor_core.cu)
 add_executable(sigmoid sigmoid.cu)
 add_executable(histogram histogram.cu)
+add_executable(layernorm layernorm.cu utils.hpp)

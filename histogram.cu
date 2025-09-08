@@ -78,7 +78,7 @@ __global__ void histogram_i32x4_kernel(int *a, int *y, int N) {
 }
 
 int main() {
-  const int N = 1024;
+  const int N = 1 << 24;
   const int HISTOGRAM_SIZE = 10;  // Values will be in range [0, 9]
 
   // Create test data
