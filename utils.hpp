@@ -41,6 +41,7 @@ struct ControlBlock {
 };
 
 // Custom template pointer class
+// TODO(huicongyao): this unfied pointer is not thread-safe.
 template <typename T>
 class UnifiedPtr {
   static_assert(std::is_trivially_copyable<T>::value,
@@ -70,9 +71,9 @@ class UnifiedPtr {
       : control(nullptr) {
     T* p = nullptr;
     if (device == DEVICE::CUDA) {
-      cudaError_t err = cudaMallocManaged(&p, _size * sizeof(T));
+      cudaError_t err = cudaMalloc(&p, _size * sizeof(T));
       if (err != cudaSuccess) {
-        throw std::runtime_error("cudaMallocManaged failed: " +
+        throw std::runtime_error("cudaMalloc failed: " +
                                  std::string(cudaGetErrorString(err)));
       }
     } else {
@@ -86,41 +87,15 @@ class UnifiedPtr {
       : control(nullptr) {
     T* p = nullptr;
     if (device == DEVICE::CUDA) {
-      cudaError_t err = cudaMallocManaged(&p, _size * sizeof(T));
+      cudaError_t err = cudaMalloc(&p, _size * sizeof(T));
       if (err != cudaSuccess) {
-        throw std::runtime_error("cudaMallocManaged failed: " +
+        throw std::runtime_error("cudaMalloc failed: " +
                                  std::string(cudaGetErrorString(err)));
       }
     } else {
       p = new T[_size];
     }
-    // 初始化数据
-    for (size_t i = 0; i < _size; ++i) {
-      p[i] = val;
-    }
     control = new ControlBlock<T>(p, _size, device);
-  }
-
-  // Constructor using an initializer_list
-  __host__ UnifiedPtr(std::initializer_list<T> initList,
-                      DEVICE device = DEVICE::CPU)
-      : control(nullptr) {
-    T* p = nullptr;
-    if (device == DEVICE::CUDA) {
-      cudaError_t err = cudaMallocManaged(&p, initList.size() * sizeof(T));
-      if (err != cudaSuccess) {
-        throw std::runtime_error("cudaMallocManaged failed: " +
-                                 std::string(cudaGetErrorString(err)));
-      }
-    } else {
-      p = new T[initList.size()];
-    }
-    // 复制数据
-    size_t i = 0;
-    for (const auto& value : initList) {
-      p[i++] = value;
-    }
-    control = new ControlBlock<T>(p, initList.size(), device);
   }
 
   UnifiedPtr(const UnifiedPtr& other) : control(other.control) {
@@ -157,15 +132,16 @@ class UnifiedPtr {
     return *this;
   }
 
+  // Temperarily implemented with inplace operator
   UnifiedPtr<T> to(DEVICE device) {
     if (device == control->device) {
       return *this;
     }
     if (device == DEVICE::CUDA && control->device == DEVICE::CPU) {
       T* new_p = nullptr;
-      cudaError_t err = cudaMallocManaged(&new_p, control->size * sizeof(T));
+      cudaError_t err = cudaMalloc(&new_p, control->size * sizeof(T));
       if (err != cudaSuccess) {
-        throw std::runtime_error("cudaMallocManaged failed: " +
+        throw std::runtime_error("cudaMalloc failed: " +
                                  std::string(cudaGetErrorString(err)));
       }
       cudaMemcpy(new_p, control->ptr, control->size * sizeof(T),
@@ -192,9 +168,14 @@ class UnifiedPtr {
   // Overloaded -> operator to support access like a raw pointer
   __host__ __device__ T* operator->() const { return control->ptr; }
 
-  // Overloaded [] operator to support index-based access
-  __host__ __device__ T& operator[](size_t index) const {
-    assert(index < control->size && "Index out of range");
+  // Overloaded [] operator to support index-based access (CPU only)
+  __host__ T& operator[](size_t index) const {
+    if (control->device == DEVICE::CUDA) {
+      throw std::runtime_error("[] operator is only supported for CPU memory");
+    }
+    if (index >= control->size) {
+      throw std::out_of_range("Index out of range");
+    }
     return control->ptr[index];
   }
 

@@ -47,6 +47,14 @@ void LaunchTensorCore(T* a, T* b, float* c, int M, int N, int K) {
   dim3 BLOCK(WMMA_M, WMMA_N);
   dim3 GIRD((N + WMMA_N - 1) / WMMA_N, (M + WMMA_M - 1) / WMMA_M);
   SgemmWmma<T><<<GIRD, BLOCK>>>(a, b, c, M, N, K);
+
+  // Check for kernel launch errors
+  cudaError_t launchErr = cudaGetLastError();
+  if (launchErr != cudaSuccess) {
+    throw std::runtime_error("Kernel launch failed: " +
+                             std::string(cudaGetErrorString(launchErr)));
+  }
+
   cudaDeviceSynchronize();
 }
 
@@ -54,16 +62,17 @@ int main() {
   constexpr int M = 64;
   constexpr int N = 64;
   constexpr int K = 64;
-
-  UnifiedPtr<nv_bfloat16> A(M * K, DEVICE::CUDA);
-  UnifiedPtr<nv_bfloat16> B(K * N, DEVICE::CUDA);
+  UnifiedPtr<nv_bfloat16> A(M * K, DEVICE::CPU);
+  UnifiedPtr<nv_bfloat16> B(K * N, DEVICE::CPU);
   UnifiedPtr<float> C(M * N, 0, DEVICE::CUDA);
 
   for (int i = 0; i < M * K; i++) A[i] = __float2bfloat16(2.0f);
   for (int i = 0; i < K * N; i++) B[i] = __float2bfloat16(0.5f);
+  A.to(DEVICE::CUDA);
+  B.to(DEVICE::CUDA);
 
   LaunchTensorCore<nv_bfloat16>(A.get(), B.get(), C.get(), M, N, K);
-  cudaDeviceSynchronize();
+  C.to(DEVICE::CPU);
   for (int i = 0; i < M; i++) {
     for (int j = 0; j < N; j++) {
       if (C[i * N + j] != static_cast<float>(K)) {
@@ -72,5 +81,7 @@ int main() {
       }
     }
   }
+
+  std::cout << "Passed" << std::endl;
   return 0;
 }

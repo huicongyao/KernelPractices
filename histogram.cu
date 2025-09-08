@@ -100,13 +100,8 @@ int main() {
     histogram_result_shared[i] = 0;
   }
 
-  // Move data to GPU
-  auto input_gpu = input_data.to(DEVICE::CUDA);
-  auto hist_gpu = histogram_result.to(DEVICE::CUDA);
-  auto hist_vec4_gpu = histogram_result_vec4.to(DEVICE::CUDA);
-  auto hist_shared_gpu = histogram_result_shared.to(DEVICE::CUDA);
-
-  // Calculate expected histogram on CPU for verification
+  // Calculate expected histogram on CPU for verification (before moving data to
+  // GPU)
   UnifiedPtr<int> expected_histogram(HISTOGRAM_SIZE, DEVICE::CPU);
   for (int i = 0; i < HISTOGRAM_SIZE; i++) {
     expected_histogram[i] = 0;
@@ -114,6 +109,24 @@ int main() {
   for (int i = 0; i < N; i++) {
     expected_histogram[input_data[i]]++;
   }
+
+  // Move data to GPU
+  // Create new unified_ptr for GPU and copy data using memcpy
+  UnifiedPtr<int> input_gpu(N, DEVICE::CUDA);
+  cudaMemcpy(input_gpu.get(), input_data.get(), N * sizeof(int),
+             cudaMemcpyHostToDevice);
+
+  UnifiedPtr<int> hist_gpu(HISTOGRAM_SIZE, DEVICE::CUDA);
+  cudaMemcpy(hist_gpu.get(), histogram_result.get(),
+             HISTOGRAM_SIZE * sizeof(int), cudaMemcpyHostToDevice);
+
+  UnifiedPtr<int> hist_vec4_gpu(HISTOGRAM_SIZE, DEVICE::CUDA);
+  cudaMemcpy(hist_vec4_gpu.get(), histogram_result_vec4.get(),
+             HISTOGRAM_SIZE * sizeof(int), cudaMemcpyHostToDevice);
+
+  UnifiedPtr<int> hist_shared_gpu(HISTOGRAM_SIZE, DEVICE::CUDA);
+  cudaMemcpy(hist_shared_gpu.get(), histogram_result_shared.get(),
+             HISTOGRAM_SIZE * sizeof(int), cudaMemcpyHostToDevice);
 
   printf("Testing histogram kernels with N=%d, histogram_size=%d\n", N,
          HISTOGRAM_SIZE);

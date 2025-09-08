@@ -114,8 +114,8 @@ void matrix_sgemm_cpu(float *a, float *b, float *c, int M, int N, int K,
 
 int main() {
   int M = 1024, N = 10240, K = 512;
-  UnifiedPtr<float> A(M * K, DEVICE::CUDA);
-  UnifiedPtr<float> B(K * N, DEVICE::CUDA);
+  UnifiedPtr<float> A(M * K, DEVICE::CPU);
+  UnifiedPtr<float> B(K * N, DEVICE::CPU);
   UnifiedPtr<float> C(M * N, DEVICE::CUDA);
 
   for (int i = 0; i < M; i++) {
@@ -129,6 +129,8 @@ int main() {
       B[i * N + j] = static_cast<float>(rand() % 10);
     }
   }
+  A = A.to(DEVICE::CUDA);
+  B = B.to(DEVICE::CUDA);
 
   auto st = std::chrono::high_resolution_clock::now();
   run_sgemm_naive_f32(A.get(), B.get(), C.get(), M, N, K);
@@ -143,6 +145,7 @@ int main() {
   ed = std::chrono::high_resolution_clock::now();
   printf("Time of cuda sliced k sgemm: %f ms\n",
          std::chrono::duration<double, std::milli>(ed - st).count());
+  C.to(DEVICE::CPU);
 
   A = A.to(DEVICE::CPU);
   B = B.to(DEVICE::CPU);

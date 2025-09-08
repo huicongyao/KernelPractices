@@ -27,6 +27,7 @@ __global__ void block_all_reduce_sum_f32_f32_kernel(float* array, float* result,
   int idx = blockIdx.x * NUM_THREADS + tid;
   constexpr int NUM_WARPS = (NUM_THREADS + WARP_SIZE - 1) / WARP_SIZE;
   __shared__ float reduce_smem[NUM_THREADS];
+
   float sum = (idx < N) ? array[idx] : 0.0f;
   int warp = tid / WARP_SIZE;
   int lane = tid % WARP_SIZE;
@@ -40,12 +41,15 @@ __global__ void block_all_reduce_sum_f32_f32_kernel(float* array, float* result,
 
 int main() {
   const int N = 1 << 20;  // 1M elements
-  UnifiedPtr<float> array(N, DEVICE::CUDA);
-  UnifiedPtr<float> result(1, DEVICE::CUDA);
+  UnifiedPtr<float> array(N, DEVICE::CPU);
+  UnifiedPtr<float> result(2, DEVICE::CUDA);
   // 初始化数据
   for (int i = 0; i < N; i++) {
     array[i] = static_cast<float>(rand() % 10);  // 测试用统一值
   }
+
+  double expected_sum = std::accumulate(array.get(), array.get() + N, 0.0f);
+  array.to(DEVICE::CUDA);
 
   // 计算网格尺寸
   dim3 block(BLOCK_SIZE);
@@ -54,16 +58,20 @@ int main() {
   // 启动核函数
   block_all_reduce_sum_f32_f32_kernel<BLOCK_SIZE>
       <<<grid, block>>>(array.get(), result.get(), N);
+
+  // 检查错误
+  cudaError_t launchErr = cudaGetLastError();
+  if (launchErr != cudaSuccess) {
+    throw std::runtime_error("Kernel launch failed: " +
+                             std::string(cudaGetErrorString(launchErr)));
+  }
   cudaDeviceSynchronize();
+  auto result_cpu = result.to(DEVICE::CPU);
 
-  // 主机端最终归约
-  //    float final_sum = 0;
-  //    for(int i=0; i<grid.x; i++) {
-  //        final_sum += result[i];
-  //    }
-
-  printf("GPU sum: %f\n", result[0]);
-  printf("Expected sum: %f\n",
-         std::accumulate(array.get(), array.get() + N, 0.0f));
+  if (std::abs(result_cpu[0] - expected_sum) > 1e-5) {
+    throw std::runtime_error("Error: " + std::to_string(result_cpu[0]));
+  } else {
+    std::cout << "Passed" << std::endl;
+  }
   return 0;
 }
