@@ -168,8 +168,13 @@ class UnifiedPtr {
   // Overloaded -> operator to support access like a raw pointer
   __host__ __device__ T* operator->() const { return control->ptr; }
 
-  // Overloaded [] operator to support index-based access (CPU only)
+  // Direct array access without bounds checking (CPU only)
   __host__ T& operator[](size_t index) const {
+    return control->ptr[index];
+  }
+
+  // Safe array access with bounds and device checking (CPU only)
+  __host__ T& at(size_t index) const {
     if (control->device == DEVICE::CUDA) {
       throw std::runtime_error("[] operator is only supported for CPU memory");
     }
@@ -194,10 +199,10 @@ class UnifiedPtr {
   bool unique() const { return use_count() == 1; }
 };
 
-template <typename Func>
+template <typename Func, typename T = float>
 void benchmark(Func func, int N, std::string prefix) {
-  UnifiedPtr<float> x(N, DEVICE::CUDA);
-  UnifiedPtr<float> y(N, DEVICE::CUDA);
+  UnifiedPtr<T> x(N, DEVICE::CUDA);
+  UnifiedPtr<T> y(N, DEVICE::CUDA);
   auto st = std::chrono::high_resolution_clock::now();
   func(x.get(), y.get(), N);
   auto ed = std::chrono::high_resolution_clock::now();
