@@ -47,27 +47,21 @@ void run_sgemm_naive_f32(float *a, float *b, float *c, int M, int N, int K) {
 template <const int BM = 32, const int BN = 32, const int BK = 32>
 __global__ void sgemm_sliced_k_f32_kernel(float *a, float *b, float *c, int M,
                                           int N, int K) {
-  // [1] Block Tile: 32x32的block处理c上一块32x32的元素计算
-  // [2]     K Tile: 使用共享内存，并将K分块为BK大小的块
   __shared__ float s_a[BM][BK], s_b[BK][BN];
 
   int bx = blockIdx.x;
   int by = blockIdx.y;
   int tx = threadIdx.x;
   int ty = threadIdx.y;
-  int tid = ty * blockDim.x + tx;  // tid within the block
-  // load values to shared memory, 32x32 threads working together
-  // to fetch data along the row direction of a and b both for s_a
-  // and s_b 32x32x4x2=8KB, we use 32x32 threads within block to
-  // load 32x32 elements from global memory to shared memory, namely,
-  // each thread will load 1 element.
+  int tid = ty * blockDim.x + tx;
+
   int load_smem_a_m = tid / BM;  // 0~31, tid / 32, tid / BM, threadIdx.y
   int load_smem_a_k = tid % BK;  // 0~31, tid % 32, tid % BK, threadIdx.x
   int load_smem_b_k = tid / BK;  // 0~31, tid / 32, tid / BK, threadIdx.y
   int load_smem_b_n = tid % BN;  // 0~31, tid % 32, tid % BN, threadIdx.x
   int load_gmem_a_m = by * BM + load_smem_a_m;  // global row of a and c
   int load_gmem_b_n = bx * BN + load_smem_b_n;  // global col of b and c
-  // if (load_gmem_a_m >= M || load_gmem_b_n >= N) return;
+  if (load_gmem_a_m >= M || load_gmem_b_n >= N) return;
 
   float sum = 0.f;
   for (int bk = 0; bk < (K + BK - 1) / BK; ++bk) {

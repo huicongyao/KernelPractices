@@ -71,7 +71,7 @@ __global__ void rms_norm_f32_kernel(float *x, float *y, float g, int N, int K) {
 }
 
 int main() {
-  const int N = 4;  // batch_size * seq_len
+  const int N = 4000;  // batch_size * seq_len
   const int K = 256;  // hidden_size
   const float scale = 1.0f;  // scale factor g
   
@@ -154,6 +154,7 @@ int main() {
   benchmark([&](float* x_ptr, float* y_ptr, int size) {
     dim3 benchmark_grid(N);
     dim3 benchmark_block(K);
+    printf("%d, %d\n", N, K);
     rms_norm_f32_kernel<<<benchmark_grid, benchmark_block>>>(x_ptr, y_ptr, scale, N, K);
     cudaDeviceSynchronize();
   }, N * K, "RMS Norm");
