@@ -52,7 +52,6 @@ class UnifiedPtr {
   ControlBlock<T>* control;
 
   void release() {
-    // todo: fix this
     if (!control) return;
     if (--control->ref_count == 0) {
       if (control->device == DEVICE::CUDA) {
@@ -169,9 +168,7 @@ class UnifiedPtr {
   __host__ __device__ T* operator->() const { return control->ptr; }
 
   // Direct array access without bounds checking (CPU only)
-  __host__ T& operator[](size_t index) const {
-    return control->ptr[index];
-  }
+  __host__ T& operator[](size_t index) const { return control->ptr[index]; }
 
   // Safe array access with bounds and device checking (CPU only)
   __host__ T& at(size_t index) const {
@@ -208,6 +205,48 @@ void benchmark(Func func, int N, std::string prefix) {
   auto ed = std::chrono::high_resolution_clock::now();
   printf("%s: %f ms\n", prefix.c_str(),
          std::chrono::duration<double, std::milli>(ed - st).count());
+}
+
+template <typename Func, typename T = float>
+void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, int repeats = 10) {
+  UnifiedPtr<T> A(M * K, DEVICE::CPU);
+  UnifiedPtr<T> B(K * N, DEVICE::CPU);
+  UnifiedPtr<T> C(M * N, DEVICE::CUDA);
+  for (int i = 0; i < M * K; i++) {
+    A[i] = static_cast<T>(0.5);
+  }
+  for (int i = 0; i < K * N; i++) {
+    B[i] = static_cast<T>(2.0);
+  }
+  A.to(DEVICE::CUDA);
+  B.to(DEVICE::CUDA);
+  auto st = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < repeats; i++) {
+    func(A.get(), B.get(), C.get(), M, N, K);
+  }
+  auto ed = std::chrono::high_resolution_clock::now();
+
+  double elapsed_ms = std::chrono::duration<double, std::milli>(ed - st).count() /
+                      static_cast<double>(repeats);
+
+  // 计算TFLOPS: 2*M*N*K (乘加操作) / 时间(秒) / 1e12
+  double tflops = (2.0 * M * N * K) / (elapsed_ms * 1e-3) / 1e12;
+
+  printf("%s: %f ms, %.2f TFLOPS\n", prefix.c_str(), elapsed_ms, tflops);
+
+  // Test correctness
+  C.to(DEVICE::CPU);
+  UnifiedPtr<T> C_cpu(M * N, DEVICE::CPU);
+  A.to(DEVICE::CPU);
+  B.to(DEVICE::CPU);
+
+  for (int i = 0; i < M * N; i++) {
+    if (std::abs(C[i] - static_cast<float>(K)) > 1e-5) {
+      printf("Error at %d: %f vs %f\n", i, C[i], C_cpu[i]);
+      return;
+    }
+  }
+  printf("Correctness test passed!\n");
 }
 
 #endif  // TEST_UTILS_HPP

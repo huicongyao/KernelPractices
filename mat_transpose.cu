@@ -59,19 +59,21 @@ __global__ void transposeSharedMem(float* input, float* output, int ROW,
 }
 
 template <const int TILE_DIM = 32>
-__global__ void mat_trans_smem_swizzle_kernel(float *input, int M, int N, float *output) {
+__global__ void mat_trans_smem_swizzle_kernel(float* input, int M, int N,
+                                              float* output) {
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
 
   __shared__ float s_data[TILE_DIM][TILE_DIM];
-  
+
   if (row < M && col < N) {
     s_data[threadIdx.x][threadIdx.y ^ threadIdx.x] = input[row * N + col];
     __syncthreads();
     int n_col = blockIdx.y * blockDim.y + threadIdx.x;
     int n_row = blockIdx.x * blockDim.x + threadIdx.y;
     if (n_row < N && n_col < M) {
-      output[n_row * M + n_col] = s_data[threadIdx.y][threadIdx.x ^ threadIdx.y];
+      output[n_row * M + n_col] =
+          s_data[threadIdx.y][threadIdx.x ^ threadIdx.y];
     }
   }
 }
@@ -82,7 +84,8 @@ void launch_transposeSharedMem(float* input, float* output, int ROW, int COL) {
             (ROW + BLOCK_SIZE - 1) / BLOCK_SIZE);
   dim3 block(BLOCK_SIZE, BLOCK_SIZE);
   // transposeSharedMem<BLOCK_SIZE><<<grid, block>>>(input, output, ROW, COL);
-  mat_trans_smem_swizzle_kernel<BLOCK_SIZE><<<grid, block>>>(input, ROW, COL, output);
+  mat_trans_smem_swizzle_kernel<BLOCK_SIZE>
+      <<<grid, block>>>(input, ROW, COL, output);
 
   // Check for kernel launch errors
   cudaError_t err = cudaGetLastError();
@@ -125,7 +128,7 @@ int main() {
   for (int i = 0; i < col; i++) {
     for (int j = 0; j < row; j++) {
       if (output_naive[i * row + j] != output_shared[i * row + j]) {
-        printf("Error at (%d, %d): %d != %d\n", i, j, output_naive[i * row + j],
+        printf("Error at (%d, %d): %f != %f\n", i, j, output_naive[i * row + j],
                output_shared[i * row + j]);
         return 1;
       }

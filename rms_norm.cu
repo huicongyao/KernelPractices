@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_fp8.h>
@@ -6,7 +5,10 @@
 #include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include <algorithm>
 #include <vector>
+
 #include "utils.hpp"
 
 #define WARP_SIZE 32
@@ -16,7 +18,8 @@
 #define BFLOAT2(value) (reinterpret_cast<__nv_bfloat162 *>(&(value))[0])
 #define LDST128BITS(value) (reinterpret_cast<float4 *>(&(value))[0])
 
-// FP32
+//  FP32
+//  Warp Reduce Sum
 template <const int kWarpSize = WARP_SIZE>
 __device__ __forceinline__ float warp_reduce_sum_f32(float val) {
 #pragma unroll
@@ -71,43 +74,46 @@ __global__ void rms_norm_f32_kernel(float *x, float *y, float g, int N, int K) {
 }
 
 int main() {
-  const int N = 4000;  // batch_size * seq_len
-  const int K = 256;  // hidden_size
+  const int N = 4000;        // batch_size * seq_len
+  const int K = 256;         // hidden_size
   const float scale = 1.0f;  // scale factor g
-  
+
   // Allocate memory for input and output
   UnifiedPtr<float> x(N * K, DEVICE::CUDA);
   UnifiedPtr<float> y(N * K, DEVICE::CUDA);
   UnifiedPtr<float> x_host(N * K, DEVICE::CPU);
   UnifiedPtr<float> y_host(N * K, DEVICE::CPU);
   UnifiedPtr<float> y_ref(N * K, DEVICE::CPU);
-  
+
   // Initialize input data with random values
   for (int i = 0; i < N * K; i++) {
-    x_host[i] = static_cast<float>(rand()) / RAND_MAX * 2.0f - 1.0f;  // Random values between -1 and 1
+    x_host[i] = static_cast<float>(rand()) / RAND_MAX * 2.0f -
+                1.0f;  // Random values between -1 and 1
   }
-  
+
   // Copy input data to device
-  cudaMemcpy(x.get(), x_host.get(), N * K * sizeof(float), cudaMemcpyHostToDevice);
-  
+  cudaMemcpy(x.get(), x_host.get(), N * K * sizeof(float),
+             cudaMemcpyHostToDevice);
+
   // Launch kernel
   dim3 grid(N);
   dim3 block(K);
   rms_norm_f32_kernel<<<grid, block>>>(x.get(), y.get(), scale, N, K);
-  
+
   // Check for kernel launch errors
   cudaError_t kernel_error = cudaGetLastError();
   if (kernel_error != cudaSuccess) {
     printf("Kernel launch failed: %s\n", cudaGetErrorString(kernel_error));
     return -1;
   }
-  
+
   // Wait for kernel to complete
   cudaDeviceSynchronize();
-  
+
   // Copy result back to host
-  cudaMemcpy(y_host.get(), y.get(), N * K * sizeof(float), cudaMemcpyDeviceToHost);
-  
+  cudaMemcpy(y_host.get(), y.get(), N * K * sizeof(float),
+             cudaMemcpyDeviceToHost);
+
   // Compute reference result on CPU
   for (int row = 0; row < N; row++) {
     // Calculate RMS for this row
@@ -118,46 +124,49 @@ int main() {
     }
     float rms = sqrtf(sum_squares / K + 1e-5f);
     float inv_rms = 1.0f / rms;
-    
+
     // Apply RMS normalization
     for (int col = 0; col < K; col++) {
       int idx = row * K + col;
       y_ref[idx] = (x_host[idx] * inv_rms) * scale;
     }
   }
-  
+
   // Verify results
   bool passed = true;
   const float tolerance = 1e-3f;
   int error_count = 0;
-  
+
   for (int i = 0; i < N * K; i++) {
     float diff = fabsf(y_host[i] - y_ref[i]);
     if (diff > tolerance) {
       if (error_count < 10) {  // Only print first 10 errors
-        printf("Error at index %d: GPU=%.6f, CPU=%.6f, diff=%.6f\n",
-               i, y_host[i], y_ref[i], diff);
+        printf("Error at index %d: GPU=%.6f, CPU=%.6f, diff=%.6f\n", i,
+               y_host[i], y_ref[i], diff);
       }
       error_count++;
       passed = false;
     }
   }
-  
+
   if (passed) {
     printf("RMS Norm kernel test PASSED!\n");
   } else {
     printf("RMS Norm kernel test FAILED! Total errors: %d\n", error_count);
   }
-  
+
   // Performance benchmark
   printf("\nPerformance benchmark:\n");
-  benchmark([&](float* x_ptr, float* y_ptr, int size) {
-    dim3 benchmark_grid(N);
-    dim3 benchmark_block(K);
-    printf("%d, %d\n", N, K);
-    rms_norm_f32_kernel<<<benchmark_grid, benchmark_block>>>(x_ptr, y_ptr, scale, N, K);
-    cudaDeviceSynchronize();
-  }, N * K, "RMS Norm");
-  
+  benchmark(
+      [&](float *x_ptr, float *y_ptr, int size) {
+        dim3 benchmark_grid(N);
+        dim3 benchmark_block(K);
+        printf("%d, %d\n", N, K);
+        rms_norm_f32_kernel<<<benchmark_grid, benchmark_block>>>(x_ptr, y_ptr,
+                                                                 scale, N, K);
+        cudaDeviceSynchronize();
+      },
+      N * K, "RMS Norm");
+
   return passed ? 0 : -1;
 }

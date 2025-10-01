@@ -5,7 +5,7 @@
 #include <iostream>
 #include <type_traits>
 
-#include "utils.hpp"
+#include "../utils.hpp"
 
 using namespace nvcuda;
 

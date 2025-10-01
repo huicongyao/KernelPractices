@@ -1,19 +1,20 @@
-#include <algorithm>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include <algorithm>
 #include <vector>
 
 #include "utils.hpp"
 
 #define WARP_SIZE 32
-#define INT4(value) (reinterpret_cast<int4 *>(&(value))[0])
-#define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
-#define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
-#define BFLOAT2(value) (reinterpret_cast<__nv_bfloat162 *>(&(value))[0])
-#define LDST128BITS(value) (reinterpret_cast<float4 *>(&(value))[0])
+#define INT4(value) (reinterpret_cast<int4*>(&(value))[0])
+#define FLOAT4(value) (reinterpret_cast<float4*>(&(value))[0])
+#define HALF2(value) (reinterpret_cast<half2*>(&(value))[0])
+#define BFLOAT2(value) (reinterpret_cast<__nv_bfloat162*>(&(value))[0])
+#define LDST128BITS(value) (reinterpret_cast<float4*>(&(value))[0])
 
 // FP32
 // Relu x: N, y: N y=max(0, x)
@@ -75,37 +76,39 @@ void relu_cpu(float* x, float* y, int N) {
 
 int main() {
   const int N = 1024 * 1024;  // 1M elements
-  
+
   // Test correctness
   printf("Testing correctness...\n");
-  
+
   // Test f32 kernel
   {
     UnifiedPtr<float> x_host(N, DEVICE::CPU);
     UnifiedPtr<float> y_host(N, DEVICE::CPU);
     UnifiedPtr<float> y_ref(N, DEVICE::CPU);
-    
+
     // Initialize with mixed positive/negative values
     for (int i = 0; i < N; i++) {
-      x_host[i] = (i % 2 == 0) ? static_cast<float>(i % 100 - 50) : static_cast<float>(-(i % 100 - 50));
+      x_host[i] = (i % 2 == 0) ? static_cast<float>(i % 100 - 50)
+                               : static_cast<float>(-(i % 100 - 50));
     }
-    
+
     // Compute reference on CPU
     relu_cpu(x_host.get(), y_ref.get(), N);
-    
+
     // Test on GPU
     UnifiedPtr<float> x_gpu = x_host.to(DEVICE::CUDA);
     UnifiedPtr<float> y_gpu(N, DEVICE::CUDA);
-    
+
     launch_relu_f32_kernel(x_gpu.get(), y_gpu.get(), N);
-    
+
     UnifiedPtr<float> y_result = y_gpu.to(DEVICE::CPU);
-    
+
     // Verify correctness
     bool correct = true;
     for (int i = 0; i < N; i++) {
       if (std::abs(y_result[i] - y_ref[i]) > 1e-5) {
-        printf("Error at index %d: expected %f, got %f\n", i, y_ref[i], y_result[i]);
+        printf("Error at index %d: expected %f, got %f\n", i, y_ref[i],
+               y_result[i]);
         correct = false;
         break;
       }
@@ -116,34 +119,36 @@ int main() {
       printf("relu_f32_kernel: FAILED\n");
     }
   }
-  
+
   // Test f32x4 kernel
   {
     UnifiedPtr<float> x_host(N, DEVICE::CPU);
     UnifiedPtr<float> y_host(N, DEVICE::CPU);
     UnifiedPtr<float> y_ref(N, DEVICE::CPU);
-    
+
     // Initialize with mixed positive/negative values
     for (int i = 0; i < N; i++) {
-      x_host[i] = (i % 2 == 0) ? static_cast<float>(i % 100 - 50) : static_cast<float>(-(i % 100 - 50));
+      x_host[i] = (i % 2 == 0) ? static_cast<float>(i % 100 - 50)
+                               : static_cast<float>(-(i % 100 - 50));
     }
-    
+
     // Compute reference on CPU
     relu_cpu(x_host.get(), y_ref.get(), N);
-    
+
     // Test on GPU
     UnifiedPtr<float> x_gpu = x_host.to(DEVICE::CUDA);
     UnifiedPtr<float> y_gpu(N, DEVICE::CUDA);
-    
+
     launch_relu_f32x4_kernel(x_gpu.get(), y_gpu.get(), N);
-    
+
     UnifiedPtr<float> y_result = y_gpu.to(DEVICE::CPU);
-    
+
     // Verify correctness
     bool correct = true;
     for (int i = 0; i < N; i++) {
       if (std::abs(y_result[i] - y_ref[i]) > 1e-5) {
-        printf("Error at index %d: expected %f, got %f\n", i, y_ref[i], y_result[i]);
+        printf("Error at index %d: expected %f, got %f\n", i, y_ref[i],
+               y_result[i]);
         correct = false;
         break;
       }
@@ -154,34 +159,35 @@ int main() {
       printf("relu_f32x4_kernel: FAILED\n");
     }
   }
-  
+
   // Test f16x2 kernel
   {
     UnifiedPtr<half> x_host(N, DEVICE::CPU);
     UnifiedPtr<half> y_host(N, DEVICE::CPU);
     UnifiedPtr<float> y_ref(N, DEVICE::CPU);
-    
+
     // Initialize with mixed positive/negative values
     for (int i = 0; i < N; i++) {
-      float val = (i % 2 == 0) ? static_cast<float>(i % 100 - 50) : static_cast<float>(-(i % 100 - 50));
+      float val = (i % 2 == 0) ? static_cast<float>(i % 100 - 50)
+                               : static_cast<float>(-(i % 100 - 50));
       x_host[i] = __float2half(val);
     }
-    
+
     // Compute reference on CPU using float precision
     UnifiedPtr<float> x_float(N, DEVICE::CPU);
     for (int i = 0; i < N; i++) {
       x_float[i] = __half2float(x_host[i]);
     }
     relu_cpu(x_float.get(), y_ref.get(), N);
-    
+
     // Test on GPU
     UnifiedPtr<half> x_gpu = x_host.to(DEVICE::CUDA);
     UnifiedPtr<half> y_gpu(N, DEVICE::CUDA);
-    
+
     launch_relu_f16x2_kernel(x_gpu.get(), y_gpu.get(), N);
-    
+
     UnifiedPtr<half> y_result = y_gpu.to(DEVICE::CPU);
-    
+
     // Verify correctness (allow for half precision tolerance)
     bool correct = true;
     for (int i = 0; i < N; i++) {
@@ -199,15 +205,16 @@ int main() {
       printf("relu_f16x2_kernel: FAILED\n");
     }
   }
-  
+
   printf("\nBenchmarking performance...\n");
-  
+
   // Benchmark performance
   benchmark(launch_relu_f32_kernel, N, "relu_f32");
   benchmark(launch_relu_f32x4_kernel, N, "relu_f32x4");
-  
-  benchmark<decltype(&launch_relu_f16x2_kernel), half>(launch_relu_f16x2_kernel, N, "relu_f16x2");
-  
+
+  benchmark<decltype(&launch_relu_f16x2_kernel), half>(launch_relu_f16x2_kernel,
+                                                       N, "relu_f16x2");
+
   printf("\nAll tests completed.\n");
   return 0;
 }
