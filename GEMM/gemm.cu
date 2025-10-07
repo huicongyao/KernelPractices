@@ -113,20 +113,13 @@ __global__ void sgemm_sliced_k_f32_dbuf_kernel(const float *__restrict__ a,
     int load_gmem_b_k = 0 * BK + load_smem_b_k;
     int load_gmem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
     s_b[0][load_smem_b_k][load_smem_b_n] = __ldg(&b[load_gmem_b_addr]);
+    __syncthreads();
   }
-  __syncthreads();
 
   float sum = 0.0f;
   for (int bk = 1; bk < (K + BK - 1) / BK; ++bk) {
     int cur_smem = (bk - 1) & 1;
     int nxt_smem = bk & 1;
-    int load_gmem_a_k = bk * BK + load_smem_a_k;
-    int load_gmem_a_addr = load_gmem_a_m * K + load_gmem_a_k;
-    s_a[nxt_smem][load_smem_a_m][load_smem_a_k] = __ldg(&a[load_gmem_a_addr]);
-    int load_gmem_b_k = bk * BK + load_smem_b_k;
-    int load_gmem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
-    s_b[nxt_smem][load_smem_b_k][load_smem_b_n] = __ldg(&b[load_gmem_b_addr]);
-    // __syncthreads();  // 双缓冲少一次内部的sync
 
 #pragma unroll
     for (int k = 0; k < BK; ++k) {
@@ -134,6 +127,13 @@ __global__ void sgemm_sliced_k_f32_dbuf_kernel(const float *__restrict__ a,
       int comp_smem_b_n = load_smem_b_n;
       sum += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n];
     }
+
+    int load_gmem_a_k = bk * BK + load_smem_a_k;
+    int load_gmem_a_addr = load_gmem_a_m * K + load_gmem_a_k;
+    s_a[nxt_smem][load_smem_a_m][load_smem_a_k] = __ldg(&a[load_gmem_a_addr]);
+    int load_gmem_b_k = bk * BK + load_smem_b_k;
+    int load_gmem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
+    s_b[nxt_smem][load_smem_b_k][load_smem_b_n] = __ldg(&b[load_gmem_b_addr]);
     __syncthreads();
   }
 
@@ -152,6 +152,170 @@ __global__ void sgemm_sliced_k_f32_dbuf_kernel(const float *__restrict__ a,
   int store_gmem_c_n = load_gmem_b_n;
   int store_gmem_c_addr = store_gmem_c_m * N + store_gmem_c_n;
   c[store_gmem_c_addr] = sum;
+}
+
+template <const int BM = 32, const int BN = 32, const int BK = 32>
+__global__ void sgemm_sliced_k_f32x4_dbuf_kernel(float *a, float *b,
+                                            float *c, int M, int N, int K) {
+  __shared__ float s_a[2][BM][BK], s_b[2][BK][BM];
+
+  int bx = blockIdx.x, by = blockIdx.y;
+  int tx = threadIdx.x, ty = threadIdx.y; // 16 x 16 = 256 threads per block
+  int tid = ty * blockDim.x + tx;
+  int load_smem_a_m = tid / 8;
+  int load_smem_a_k = tid % 8 * 4;
+  int load_smem_b_k = tid / 8;
+  int load_smem_b_n = tid % 8 * 4;
+  int load_gmem_a_m = by * BM + load_smem_a_m;
+  int load_gmem_b_n = bx * BN + load_smem_b_n;
+
+  {  // Load first buffer
+    int load_gmem_a_k = 0 * BK + load_smem_a_k;
+    int load_gmem_a_addr = load_gmem_a_m * K + load_gmem_a_k;
+    // float4 a_val = FLOAT4(a[load_gmem_a_addr]);
+    FLOAT4(s_a[0][load_smem_a_m][load_smem_a_k]) = FLOAT4(a[load_gmem_a_addr]);
+    int load_gmem_b_k = 0 * BK + load_smem_b_k;
+    int load_gmem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
+    // float4 b_val = FLOAT4(b[load_gmem_b_addr]);
+    FLOAT4(s_b[0][load_smem_b_k][load_smem_b_n]) = FLOAT4(b[load_gmem_b_addr]);
+    __syncthreads();
+  }
+
+  float sum[4] = {0.0f};
+  for (int bk = 1; bk < (K + BK - 1) / BK; ++bk) {
+    int cur_smem = (bk - 1) & 1;
+    int nxt_smem = bk & 1;
+#pragma unroll
+    for (int k = 0; k < BK; k++) {
+      int comp_smem_a_m = load_smem_a_m;
+      int comp_smem_b_n = load_smem_b_n;
+      sum[0] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n];
+      sum[1] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n + 1];
+      sum[2] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n + 2];
+      sum[3] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n + 3];
+    }
+
+    int load_gmem_a_k = bk * BK + load_smem_a_k;
+    int load_gmem_a_addr = load_gmem_a_m * K + load_gmem_a_k;
+    // float4 a_val = FLOAT4(a[load_gmem_a_addr]);
+    FLOAT4(s_a[nxt_smem][load_smem_a_m][load_smem_a_k]) = FLOAT4(a[load_gmem_a_addr]);
+    int load_gmem_b_k = bk * BK + load_smem_b_k;
+    int load_gmem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
+    // float4 b_val = FLOAT4(b[load_gmem_b_addr]);
+    FLOAT4(s_b[nxt_smem][load_smem_b_k][load_smem_b_n]) = FLOAT4(b[load_gmem_b_addr]);
+    __syncthreads();
+  }
+
+  {
+    int bk = (K + BK - 1) / BK;
+    int cur_smem = (bk - 1) & 1;
+#pragma unroll
+    for (int k = 0; k < BK; k++) {
+      int comp_smem_a_m = load_smem_a_m;
+      int comp_smem_b_n = load_smem_b_n;
+      sum[0] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n];
+      sum[1] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n + 1];
+      sum[2] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n + 2];
+      sum[3] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n + 3];
+    }
+  }
+  int store_gmem_c_m = load_gmem_a_m;
+  int store_gmem_c_n = load_gmem_b_n;
+  int store_gmem_c_addr = store_gmem_c_m * N + store_gmem_c_n;
+  c[store_gmem_c_addr]     = sum[0];
+  c[store_gmem_c_addr + 1] = sum[1];
+  c[store_gmem_c_addr + 2] = sum[2];
+  c[store_gmem_c_addr + 3] = sum[3];
+}
+
+template <const int BM = 64, const int BN = 64, const int BK = 16,
+          const int TM = 4, const int TN = 4>
+__global__ void sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel(float *a, float *b, float *c, int M, int N, int K) {
+  const int bx = blockIdx.x;
+  const int by = blockIdx.y;
+  const int tx = threadIdx.x;
+  const int ty = threadIdx.y;
+  const int tid = ty * blockDim.x + tx; // thread id in a block
+
+  __shared__ float s_a[2][BM][BK];  // 2 x 64 x 16
+  __shared__ float s_b[2][BK][BN];  // 2 x 16 x 64
+  // total 2 x 2 x 16 x 64 x 4 B = 16KB, shared mem
+
+  // 256 线程，每线程读取四个元素
+  int load_smem_a_m = tid / 4;  // (256 / 4) * (16 / 4) = 256 threads
+  int load_smem_a_k = tid % 4 << 2;
+  int load_smem_b_k = tid / 16;
+  int load_smem_b_n = tid % 16 << 2;  // (256 / 4) * (16 / 4) = 256 threads
+  int load_gmem_a_m = by * BM + load_smem_a_m;
+  int load_gmem_b_n = bx * BN + load_smem_b_n;
+
+  // Load first buffer
+  {
+    int load_gmem_a_k = 0 * BK + load_smem_a_k;
+    int load_smem_a_addr = load_gmem_a_m * K + load_gmem_a_k;
+    FLOAT4(s_a[0][load_smem_a_m][load_smem_a_k]) = FLOAT4(a[load_smem_a_addr]);
+    int load_gmem_b_k = 0 * BK + load_smem_b_k;
+    int load_smem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
+    FLOAT4(s_b[0][load_smem_b_k][load_smem_b_n]) = FLOAT4(b[load_smem_b_addr]);
+    __syncthreads();
+  }
+
+  float r_c[TM][TN] = {0.0f};
+  for (int bk = 1; bk < (K + BK - 1) / BK; bk++) {
+    int cur_smem = (bk - 1) & 1;
+    int nxt_smem = bk & 1;
+#pragma unroll
+    for (int k = 0; k < BK; k++) {
+    // 每个线程负责计算BM * BN(64x64)中的(4x4)个元素
+#pragma unroll
+      for (int m = 0; m < TM; m++) {
+#pragma unroll
+        for (int n = 0; n < TN; n++) {
+          int comp_smem_a_m = ty * TM + m;
+          int comp_smem_b_n = tx * TN + n;
+          r_c[m][n] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n];
+        }
+      }
+    }
+
+    int load_gmem_a_k = bk * BK + load_smem_a_k;
+    int load_smem_a_addr = load_gmem_a_m * K + load_gmem_a_k;
+    FLOAT4(s_a[nxt_smem][load_smem_a_m][load_smem_a_k]) = FLOAT4(a[load_smem_a_addr]);
+    int load_gmem_b_k = bk * BK + load_smem_b_k;
+    int load_smem_b_addr = load_gmem_b_k * N + load_gmem_b_n;
+    FLOAT4(s_b[nxt_smem][load_smem_b_k][load_smem_b_n]) = FLOAT4(b[load_smem_b_addr]);
+    __syncthreads();
+  }
+
+  // Compute last buffer
+  {
+    int bk = (K + BK - 1) / BK;
+    int cur_smem = (bk - 1) & 1;
+#pragma unroll
+    for (int k = 0; k < BK; k++) {
+    // 每个线程负责计算BM * BN(64x64)中的(4x4)个元素
+#pragma unroll
+      for (int m = 0; m < TM; m++) {
+#pragma unroll
+        for (int n = 0; n < TN; n++) {
+          int comp_smem_a_m = ty * TM + m;
+          int comp_smem_b_n = tx * TN + n;
+          r_c[m][n] += s_a[cur_smem][comp_smem_a_m][k] * s_b[cur_smem][k][comp_smem_b_n];
+        }
+      }
+    }
+  }
+
+#pragma unroll
+  for (int m = 0; m < TM; m++) {
+    int store_gmem_c_m = by * BM + ty * TM + m;
+#pragma unroll
+    for (int n = 0; n < TN; n += 4) {
+      int store_gmem_c_n = bx * BN + tx * TN + n;
+      int store_gmem_c_addr = store_gmem_c_m * N + store_gmem_c_n;
+      FLOAT4(c[store_gmem_c_addr]) = FLOAT4(r_c[m][n]);
+    }
+  }
 }
 
 // SGEMM: Block Tile + Thread Tile + K Tile + Vec4, with smem
@@ -234,6 +398,7 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_kernel(float *a, float *b, float *c,
   }
 }
 
+// BCF: block column first
 template <const int BM = 128, const int BN = 128, const int BK = 8,
           const int TM = 8, const int TN = 8, const int OFFSET = 0>
 __global__ void
@@ -247,30 +412,20 @@ sgemm_t_8x8_sliced_k_f32x4_bcf_kernel(float *a, float *b, float *c, const int M,
 
   __shared__ float s_a[BK][BM + OFFSET];
   __shared__ float s_b[BK][BN + OFFSET];
-  // __shared__ float s_a[BK][BM + 4];
-  // __shared__ float s_b[BK][BN + 4];
 
-  float r_load_a[TM / 2]; // 4
-  float r_load_b[TN / 2]; // 4
-  float r_comp_a[TM];
-  float r_comp_b[TN];
-  float r_c[TM][TN] = {0.0};
+  float r_load_a[TM / 2];  // 4
+  float r_load_b[TN / 2];  // 4
+  float r_comp_a[TM];  // 8
+  float r_comp_b[TN];  // 8
+  float r_c[TM][TN] = {0.0};  // 8x8=64
 
   // mapping tid to s_a[BK][BM], for each orginal m-th row, load 4 + 4 K-dim
   // row major values from A matrix, and store it in COL major s_a[BK][BM].
   int load_a_smem_m = tid / 2; // tid / 2，(0,1,2,...,128)
-  // (0b00000000 & 0b00000001) << 2 = 0
-  // (0b00000001 & 0b00000001) << 2 = 4
-  // (0b00000010 & 0b00000001) << 2 = 0
-  // (0b00000011 & 0b00000001) << 2 = 4
   int load_a_smem_k = (tid & 1) << 2; // (0,4)
   // mapping tid to s_b[BK][BN], for each orginal k-th row, load 4 + 4 N-dim
   // row major values from B matrix, and store it in ROW major s_b[BK][BN].
-  int load_b_smem_k = tid / 32; // 0~8
-  // (0b00000000 & 0b00011111) << 2 = 0
-  // (0b00000001 & 0b00011111) << 2 = 4
-  // (0b00000010 & 0b00011111) << 2 = 8
-  // (0b00000011 & 0b00011111) << 2 = 12
+  int load_b_smem_k = tid / 32;
   int load_b_smem_n = (tid & 31) << 2; // (0,4,8,12,...,124)
 
   int load_a_gmem_m = by * BM + load_a_smem_m;
@@ -286,98 +441,18 @@ sgemm_t_8x8_sliced_k_f32x4_bcf_kernel(float *a, float *b, float *c, const int M,
     int load_b_gmem_addr = load_b_gmem_k * N + load_b_gmem_n;
     FLOAT4(r_load_a[0]) = FLOAT4(a[load_a_gmem_addr]);
     FLOAT4(r_load_b[0]) = FLOAT4(b[load_b_gmem_addr]);
-
-    // 0. bank layout analysis: s_a[8][128]
-    // 4 bytes per bank(32 banks, total 128 bytes, 32 float values),
-    // 1 float per bank. smem banks layout for s_a[8][128]:
-    // 8*(128/32)=32 bank layers, 4 layers per k-th row.
-    // [k=0][m=  [0],   [1],   [2],...,    [31]]
-    // layer_0   [b0],  [b1],  [b2],...,   [b31]
-    // [k=0][m=  [32],  [33],  [34],...,   [63]]
-    // layer_1   [b0],  [b1],  [b2],...,   [b31]
-    // [k=0][m=  [64],  [65],  [66],...,   [95]]
-    // layer_2   [b0],  [b1],  [b2],...,   [b31]
-    // [k=0][m=  [96],  [97],  [98],...,   [127]]
-    // layer_3   [b0],  [b1],  [b2],...,   [b31]
-    // ...       ...               ...
-    // [k=7][m=  [0],   [1],   [2],...,    [31]]
-    // layer_28  [b0],  [b1],  [b2],...,   [b31]
-    // [k=7][m=  [32],  [33],  [34],...,   [63]]
-    // layer_29  [b0],  [b1],  [b2],...,   [b31]
-    // [k=7][m=  [64],  [65],  [66],...,   [95]]
-    // layer_30  [b0],  [b1],  [b2],...,   [b31]
-    // [k=7][m=  [96],  [97],  [98],...,   [127]]
-    // layer_31  [b0],  [b1],  [b2],...,   [b31]
-    // 1. bank conficts analysis: s_a[8][128]
-    // tid 0   -> m 0,   k 0 -> all access bank 0  (layer_0/4/8/12)
-    // tid 1   -> m 0,   k 4 -> all access bank 0  (layer_16/20/24/28)
-    // tid 2   -> m 1,   k 0 -> all access bank 1  (layer_0/4/8/12)
-    // tid 3   -> m 1,   k 4 -> all access bank 1  (layer_16/20/24/28)
-    // tid 4   -> m 2,   k 0 -> all access bank 2  (layer_0/4/8/12)
-    // tid 5   -> m 2,   k 4 -> all access bank 2  (layer_16/20/24/28)
-    // tid 6   -> m 3,   k 0 -> all access bank 3  (layer_0/4/8/12)
-    // tid 7   -> m 3,   k 4 -> all access bank 3  (layer_16/20/24/28)
-    // ...        ...           ...                ...
-    // tid 28  -> m 14,  k 0 -> all access bank 14 (layer_0/4/8/12)
-    // tid 29  -> m 14,  k 4 -> all access bank 14 (layer_16/20/24/28)
-    // tid 30  -> m 15,  k 0 -> all access bank 15 (layer_0/2/4/6)
-    // tid 31  -> m 15,  k 4 -> all access bank 15 (layer_16/20/24/28)
-    // conclusion: we still have bank conflicts for smem_a write access,
-    // each 2 consecutive threads within warp access the same bank!
-    // thus, we still need 2 memory issues as least per warp.
     s_a[load_a_smem_k][load_a_smem_m] = r_load_a[0];     // e.g layer_0  b0
     s_a[load_a_smem_k + 1][load_a_smem_m] = r_load_a[1]; // e.g layer_4  b0
     s_a[load_a_smem_k + 2][load_a_smem_m] = r_load_a[2]; // e.g layer_8  b0
     s_a[load_a_smem_k + 3][load_a_smem_m] = r_load_a[3]; // e.g layer_12 b0
-    // 2. bank layout analysis: s_b[8][128] same as s_a[8][128]
-    // 3. bank conficts analysis: s_b[8][128]
-    // tid 0   -> k 0, n 0   -> all access bank 0~3   (layer_0)
-    // tid 1   -> k 0, n 4   -> all access bank 4~7   (layer_0)
-    // tid 2   -> k 0, n 8   -> all access bank 7~11  (layer_0)
-    // tid 7   -> k 0, n 28  -> all access bank 28~31 (layer_0)
-    // tid 8   -> k 0, n 32  -> all access bank 0~3   (layer_1)
-    // ...        ...         ...                 ...
-    // tid 15  -> k 0, n 60  -> all access bank 28~31 (layer_1)
-    // tid 16  -> k 0, n 64  -> all access bank 0~3   (layer_2)
-    // ...        ...         ...                 ...
-    // tid 31  -> k 0, n 124 -> all access bank 28~31 (layer_3)
-    // conclusion: we still have bank conflicts within warp,
-    // 0/8/16/24 -> bank 0~3, 1/9/17/25 -> bank 4~7, etc.
-    // thus, we still need 4 memory issues at least per warp.
     FLOAT4(s_b[load_b_smem_k][load_b_smem_n]) = FLOAT4(r_load_b[0]);
 
     __syncthreads();
 
 #pragma unroll
     for (int tk = 0; tk < BK; tk++) {
-      // bank conflicts analysis, tx/ty 0~15, 0~7 bank 4*8=32 bytes
-      // tid 0~15 access bank 0~3,  tid 16~31 access bank 4~7, etc.
-      // tid 0,  tk 0 -> ty 0 -> [0][0+0~3],[0][64+0~3] -> bank 0~3(layer_0/2),
-      // tid 0,  tk 7 -> ty 0 -> [7][0+0~3],[0][64+0~3] -> bank
-      // 0~3(layer_28/30), tid 15, tk 0 -> ty 0 -> [0][0+0~3],[0][64+0~3] ->
-      // bank 0~3(layer_0/2), tid 15, tk 7 -> ty 0 -> [7][0+0~3],[0][64+0~3] ->
-      // bank 0~3(layer_28/30), tid 16, tk 0 -> ty 1 -> [0][0+4~7],[0][64+4~7]
-      // -> bank 4~7(layer_0/2), tid 16, tk 7 -> ty 1 -> [7][0+4~7],[0][64+4~7]
-      // -> bank 4~7(layer_28/30), tid 31, tk 0 -> ty 1 ->
-      // [0][0+4~7],[0][64+4~7] -> bank 4~7(layer_0/2), tid 31, tk 7 -> ty 1 ->
-      // [7][0+4~7],[0][64+4~7] -> bank 4~7(layer_28/30), tid 255,tk 0 -> ty 15
-      // -> [0][0+60~63],[0][64+60~63] -> bank 28~31(layer_1/3), tid 255,tk 7 ->
-      // ty 15 -> [7][0+60~63],[0][64+60~63] -> bank 28~31(layer_29/31),
       FLOAT4(r_comp_a[0]) = FLOAT4(s_a[tk][ty * TM / 2]);
       FLOAT4(r_comp_a[4]) = FLOAT4(s_a[tk][ty * TM / 2 + BM / 2]);
-      // if (tid == < 32 && bx == 0 && by == 0) {
-      //   printf("tid: %d, tx: %d, ty: %d, [%d][%d]\n", tid, tx, ty, tk, ty *
-      //   TM / 2); printf("tid: %d, tx: %d, ty: %d, [%d][%d]\n", tid, tx, ty,
-      //   tk, ty * TM / 2 + BM / 2);
-      // }
-      // conclusion: still have bank conflicts, need 16 memory issues ?
-
-      // tid 0/8/16/24  access bank 0~3,  tid 1/9/17/25  access bank 4~7,
-      // tid 2/10/18/26 access bank 8~11, tid 7/15/23/31 access bank 28~31, etc.
-      // tid 0, tk 0 -> tx 0 -> [0][0+0~3],[0][64+0~3] -> bank 0~3(layer_0/2),
-      // tid 0, tk 7 -> tx 0 -> [7][0+0~3],[0][64+0~3] -> bank 0~3(layer_28/30),
-      // tid 1, tk 0 -> tx 1 -> [0][0+4~7],[0][64+4~7] -> bank 4~7(layer_0/2),
-      // tid 1, tk 7 -> tx 1 -> [7][0+4~7],[0][64+4~7] -> bank 4~7(layer_28/30),
       FLOAT4(r_comp_b[0]) = FLOAT4(s_b[tk][tx * TN / 2]);
       FLOAT4(r_comp_b[4]) = FLOAT4(s_b[tk][tx * TN / 2 + BN / 2]);
       // conclusion: still have some bank conflicts, need 4 memory issues.
@@ -417,7 +492,7 @@ sgemm_t_8x8_sliced_k_f32x4_bcf_kernel(float *a, float *b, float *c, const int M,
 template <const int BM = 128, const int BN = 128, const int BK = 8,
           const int TM = 8, const int TN = 8, const int OFFSET = 0>
 __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
-    float *a, float *b, float *c, const int M, const int N, const int K) {
+    const float *__restrict__ a, const float *__restrict__ b, float *__restrict__ c, const int M, const int N, const int K) {
   const int bx = blockIdx.x;
   const int by = blockIdx.y;
   const int tx = threadIdx.x;
@@ -426,6 +501,7 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
 
   __shared__ float s_a[2][BK][BM + OFFSET];
   __shared__ float s_b[2][BK][BN + OFFSET];
+  // Totally 16KB shared memory
 
   float r_load_a[TM / 2];
   float r_load_b[TN / 2];
@@ -436,18 +512,10 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
   // mapping tid to s_a[BK][BM], for each orginal m-th row, load 4 + 4 K-dim
   // row major values from A matrix, and store it in COL major s_a[BK][BM].
   int load_a_smem_m = tid / 2;  // tid / 2，(0,1,2,...,128)
-  // (0b00000000 & 0b00000001) << 2 = 0
-  // (0b00000001 & 0b00000001) << 2 = 4
-  // (0b00000010 & 0b00000001) << 2 = 0
-  // (0b00000011 & 0b00000001) << 2 = 4
   int load_a_smem_k = (tid & 1) << 2;  // (0,4)
   // mapping tid to s_b[BK][BN], for each orginal k-th row, load 4 + 4 N-dim
   // row major values from B matrix, and store it in ROW major s_b[BK][BN].
   int load_b_smem_k = tid / 32;  // 0~8
-  // (0b00000000 & 0b00011111) << 2 = 0
-  // (0b00000001 & 0b00011111) << 2 = 4
-  // (0b00000010 & 0b00011111) << 2 = 8
-  // (0b00000011 & 0b00011111) << 2 = 12
   int load_b_smem_n = (tid & 31) << 2;  // (0,4,8,12,...,124)
 
   int load_a_gmem_m = by * BM + load_a_smem_m;
@@ -464,15 +532,14 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
   // Memory做load时，不会影响后续FFMA及其它运算指令的 launch
   // 执行，也就达到了Double Buffering的目的。
 
-  // bk = 0 is loading here, buffer 0
-
+  // Load first tiles
   {
     int load_a_gmem_k = load_a_smem_k;
     int load_a_gmem_addr = load_a_gmem_m * K + load_a_gmem_k;
     int load_b_gmem_k = load_b_smem_k;
     int load_b_gmem_addr = load_b_gmem_k * N + load_b_gmem_n;
-    FLOAT4(r_load_a[0]) = FLOAT4(a[load_a_gmem_addr]);
-    FLOAT4(r_load_b[0]) = FLOAT4(b[load_b_gmem_addr]);
+    FLOAT4(r_load_a[0]) = __ldg(reinterpret_cast<const float4*>(&a[load_a_gmem_addr]));
+    FLOAT4(r_load_b[0]) = __ldg(reinterpret_cast<const float4*>(&b[load_b_gmem_addr]));
 
     s_a[0][load_a_smem_k + 0][load_a_smem_m] = r_load_a[0];
     s_a[0][load_a_smem_k + 1][load_a_smem_m] = r_load_a[1];
@@ -483,9 +550,6 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
   // Without this synchronization, accuracy may occasionally be abnormal.
   __syncthreads();
 
-  // bk start from 1，需要注意的是，虽然 bk 从 1 开始，但实际上 bk=1时，使用的是
-  // 第0块BK中的数据（已经加载到共享内存s_a[0]和s_b[0]）；bk=2时，实际计算的是第1块
-  // BK中的数据。其余以此类推，这个循环结束后，剩下最后一块BK大小的数据需要计算。
   for (int bk = 1; bk < (K + BK - 1) / BK; bk++) {
     int smem_sel = (bk - 1) & 1;
     int smem_sel_next = bk & 1;
@@ -494,8 +558,8 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
     int load_a_gmem_addr = load_a_gmem_m * K + load_a_gmem_k;
     int load_b_gmem_k = bk * BK + load_b_smem_k;
     int load_b_gmem_addr = load_b_gmem_k * N + load_b_gmem_n;
-    FLOAT4(r_load_a[0]) = FLOAT4(a[load_a_gmem_addr]);
-    FLOAT4(r_load_b[0]) = FLOAT4(b[load_b_gmem_addr]);
+    FLOAT4(r_load_a[0]) = __ldg(reinterpret_cast<const float4*>(&a[load_a_gmem_addr]));
+    FLOAT4(r_load_b[0]) = __ldg(reinterpret_cast<const float4*>(&b[load_b_gmem_addr]));
 
 #pragma unroll
     for (int tk = 0; tk < BK; tk++) {
@@ -508,17 +572,11 @@ __global__ void sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
       for (int tm = 0; tm < TM; tm++) {
 #pragma unroll
         for (int tn = 0; tn < TN; tn++) {
-          // r_c[tm][tn] += r_comp_a[tm] * r_comp_b[tn];
           r_c[tm][tn] = __fmaf_rn(r_comp_a[tm], r_comp_b[tn], r_c[tm][tn]);
         }
       }
     }
 
-    // 对比非double buffers版本，此处不需要__syncthreads()，总共节省了
-    // ((K + BK - 1) / BK) - 1 次block内的同步操作。比如，bk=1时，HFMA计算
-    // 使用的是s_a[0]和s_b[0]，因此，和s_a[1]和s_b[1]的加载是没有依赖关系的。
-    // 从global内存到s_a[1]和s_b[1]和HFMA计算可以并行。s_a[1]和s_b[1]用于
-    // 加载下一块BK需要的数据到共享内存。
     s_a[smem_sel_next][load_a_smem_k + 0][load_a_smem_m] = r_load_a[0];
     s_a[smem_sel_next][load_a_smem_k + 1][load_a_smem_m] = r_load_a[1];
     s_a[smem_sel_next][load_a_smem_k + 2][load_a_smem_m] = r_load_a[2];
@@ -592,6 +650,22 @@ void launch_sgemm_sliced_k_f32_dbuf_kernel(const float *a, const float *b,
   // cudaDeviceSynchronize();
 }
 
+void launch_sgemm_sliced_k_f32x4_dbuf_kernel(float *a, float *b, float *c, int M,
+                                          int N, int K) {
+  constexpr int BM = 32, BN = 32, BK = 32;
+  dim3 block(BN / 2, BM / 2);
+  dim3 grid((N + BN - 1) / BN, (M + BM - 1) / BM);
+  sgemm_sliced_k_f32x4_dbuf_kernel<BM, BN, BK><<<grid, block>>>(a, b, c, M, N, K);
+}
+
+void launch_sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel(float *a, float *b, float *c, int M, int N, int K) {
+  constexpr int BM = 64, BN = 64, BK = 16, TM = 4, TN = 4;
+
+  dim3 block(BN / TN, BM / TM);
+  dim3 grid((N + BN - 1) / BN, (M + BM - 1) / BM);
+  sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel<BM, BN, BK, TM, TN><<<grid, block>>>(a, b, c, M, N, K);
+}
+
 void launch_sgemm_t_8x8_sliced_k_f32x4_kernel(float *a, float *b, float *c,
                                                 int M, int N, int K) {
   constexpr int BM = 128;
@@ -605,30 +679,26 @@ void launch_sgemm_t_8x8_sliced_k_f32x4_kernel(float *a, float *b, float *c,
 
   sgemm_t_8x8_sliced_k_f32x4_kernel<BM, BN, BK, TM, TN><<<grid, block>>>(
       a, b, c, M, N, K);
-
-  // 检测kernel launch是否成功
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess) {
-    printf("CUDA kernel launch failed: %s (error code: %d)\n",
-           cudaGetErrorString(error), error);
-    printf("Grid dimensions: (%d, %d, %d), Block dimensions: (%d, %d, %d)\n",
-           grid.x, grid.y, grid.z, block.x, block.y, block.z);
-    return;
-  }
-
-  // 检测kernel执行是否成功
-  error = cudaDeviceSynchronize();
-  if (error != cudaSuccess) {
-    printf("CUDA kernel execution failed: %s (error code: %d)\n",
-           cudaGetErrorString(error), error);
-    return;
-  }
-
-  // cudaDeviceSynchronize();
 }
 
-void launch_sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(float *a, float *b,
-                                                       float *c, int M, int N,
+void launch_sgemm_t_8x8_sliced_k_f32x4_bcf_kernel(float *a, float *b, float *c,
+                                                   int M, int N, int K) {
+  constexpr int BM = 128;
+  constexpr int BN = 128;
+  constexpr int BK = 8;
+  constexpr int TM = 8;
+  constexpr int TN = 8;
+
+  dim3 block(BN / TN, BM / TM);
+  dim3 grid((N + BN - 1) / BN, (M + BM - 1) / BM);
+
+  sgemm_t_8x8_sliced_k_f32x4_bcf_kernel<BM, BN, BK, TM, TN>
+      <<<grid, block>>>(a, b, c, M, N, K);
+}
+
+
+void launch_sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(const float *__restrict__ a, const float *__restrict__ b,
+                                                       float *__restrict__ c, int M, int N,
                                                        int K) {
   constexpr int BM = 128;
   constexpr int BN = 128;
@@ -643,42 +713,43 @@ void launch_sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(float *a, float *b,
   // cudaDeviceSynchronize();
 }
 
-void matrix_sgemm_cpu(float *a, float *b, float *c, int M, int N, int K,
-                      int threads) {
-#pragma omp parallel for num_threads(threads)
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      c[i * N + j] = 0;
-      for (int k = 0; k < K; k++) {
-        c[i * N + j] += a[i * K + k] * b[k * N + j];
-      }
-    }
-  }
+void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
+  printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
+
+  benchmark_gemm(launch_sgemm_naive_f32, M, N, K, "cuda sgemm_naive_f32", repeats);
+
+  benchmark_gemm(launch_sgemm_sliced_k_f32, M, N, K, "cuda sgemm_sliced_k_f32", repeats);
+
+  benchmark_gemm(launch_sgemm_sliced_k_f32_dbuf_kernel, M, N, K,
+                "cuda sgemm_sliced_k_f32_dbuf_kernel", repeats);
+
+  benchmark_gemm(launch_sgemm_sliced_k_f32x4_dbuf_kernel, M, N, K,
+                "cuda sgemm_sliced_k_f32x4_dbuf_kernel", repeats);
+
+  benchmark_gemm(launch_sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel, M, N, K,
+                "cuda sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel", repeats);
+
+  benchmark_gemm(launch_sgemm_t_8x8_sliced_k_f32x4_kernel, M, N, K,
+                "cuda sgemm_t_8x8_sliced_k_f32x4_kernel", repeats);
+
+  benchmark_gemm(launch_sgemm_t_8x8_sliced_k_f32x4_bcf_kernel, M, N, K,
+                "cuda sgemm_t_8x8_sliced_k_f32x4_bcf_kernel", repeats);
+
+  benchmark_gemm(launch_sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel, M, N, K,
+                "cuda sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel", repeats);
 }
 
 int main() {
-  constexpr int M = 5120, N = 5120, K = 5120;
-  constexpr int repeats = 1;
-
-  printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
-
-  // Benchmark naive sgemm
-  benchmark_gemm(launch_sgemm_naive_f32, M, N, K, "cuda naive sgemm", repeats);
-
-  // Benchmark sliced k sgemm
-  benchmark_gemm(launch_sgemm_sliced_k_f32, M, N, K, "cuda sliced k sgemm", repeats);
-
-  // Benchmark sliced k sgemm with double buffering
-  benchmark_gemm(launch_sgemm_sliced_k_f32_dbuf_kernel, M, N, K,
-                 "cuda sliced k sgemm with double buffering", repeats);
-
-  // Benchmark optimized sgemm
-  benchmark_gemm(launch_sgemm_t_8x8_sliced_k_f32x4_kernel, M, N, K,
-                 "cuda sgemm_t_8x8_sliced_k_f32x4_kernel", repeats);
-
-  // Benchmark optimized sgemm with double buffering
-  benchmark_gemm(launch_sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel, M, N, K,
-                 "cuda sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel", repeats);
+  constexpr int repeats = 10;
+  std::vector<int> shape = {4096, 8192};
+  // std::vector<int> shape = {5120};
+  for (auto M : shape) {
+    for (auto N : shape) {
+      for (auto K : shape) {
+        benchmark_group_gemm(M, N, K, repeats);
+      }
+    }
+  }
 
   return 0;
 }

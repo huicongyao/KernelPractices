@@ -27,12 +27,23 @@ void cublas_sgemm(float *A, float *B, float *C, size_t M, size_t N, size_t K) {
   // cudaDeviceSynchronize();
 }
 
-int main() {
-  constexpr int M = 5120, N = 5120, K = 5120;
-  constexpr int repeat = 10;
-
+void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
+  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm warp up run", repeats);
+  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeats);
+}
 
-  // Benchmark naive sgemm
-  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeat);
+int main() {
+  constexpr int repeats = 100;
+  std::vector<int> shape = {4096, 8192, 4096 * 3};
+  // std::vector<int> shape = {5120};
+  for (auto M : shape) {
+    for (auto N : shape) {
+      for (auto K : shape) {
+        benchmark_group_gemm(M, N, K, repeats);
+      }
+    }
+  }
+
+  return 0;
 }

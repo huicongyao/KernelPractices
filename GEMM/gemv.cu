@@ -110,9 +110,9 @@ int main() {
   }
 
   if (correct) {
-    printf("\nAll tests passed! ✅\n");
+    printf("\nAll tests passed!\n");
   } else {
-    printf("\nSome tests failed! ❌\n");
+    printf("\nSome tests failed!\n");
   }
 
   return 0;

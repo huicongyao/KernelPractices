@@ -241,7 +241,7 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, i
   // 计算TFLOPS: 2*M*N*K (乘加操作) / 时间(秒) / 1e12
   double tflops = (2.0 * M * N * K) / (elapsed_ms * 1e-3) / 1e12;
 
-  printf("%s: %f ms, %.2f TFLOPS\n", prefix.c_str(), elapsed_ms, tflops);
+  printf("TEST: %-60s: %8.3f ms, %7.2f TFLOPS\n", prefix.c_str(), elapsed_ms, tflops);
 
   // Test correctness
   C.to(DEVICE::CPU);
@@ -249,13 +249,14 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, i
   A.to(DEVICE::CPU);
   B.to(DEVICE::CPU);
 
+  float target = static_cast<float>(K);
   for (int i = 0; i < M * N; i++) {
-    if (std::abs(C[i] - static_cast<float>(K)) > 1e-5) {
-      printf("Error at %d: %f vs %f\n", i, C[i], C_cpu[i]);
+    if (std::abs(C[i] - target) > 1e-5) {
+      printf("Error at %d: %f vs %f\n", i, C[i], target);
       return;
     }
   }
-  printf("Correctness test passed!\n");
+
 }
 
 #endif  // TEST_UTILS_HPP

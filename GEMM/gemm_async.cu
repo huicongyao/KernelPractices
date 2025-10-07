@@ -327,14 +327,27 @@ void launch_sgemm_t_8x8_sliced_k16_f32x4_bcf_dbuf_async_kernel(float *a,
   cudaDeviceSynchronize();
 }
 
-int main() {
-  constexpr int M = 1024, N = 5120, K = 10240;
-
+void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
 
   benchmark_gemm(launch_sgemm_t_8x4_sliced_k16_f32x4_bcf_dbuf_async_kernel, M,
-                 N, K, "sgemm_t_8x4_sliced_k16_f32x4_bcf_dbuf_async_kernel");
+                 N, K, "sgemm_t_8x4_sliced_k16_f32x4_bcf_dbuf_async_kernel", repeats);
 
   benchmark_gemm(launch_sgemm_t_8x8_sliced_k16_f32x4_bcf_dbuf_async_kernel, M,
-                 N, K, "sgemm_t_8x8_sliced_k16_f32x4_bcf_dbuf_async_kernel");
+                 N, K, "sgemm_t_8x8_sliced_k16_f32x4_bcf_dbuf_async_kernel", repeats);
+}
+
+int main() {
+  constexpr int repeats = 10;
+  std::vector<int> shape = {4096, 8192};
+  // std::vector<int> shape = {5120};
+  for (auto M : shape) {
+    for (auto N : shape) {
+      for (auto K : shape) {
+        benchmark_group_gemm(M, N, K, repeats);
+      }
+    }
+  }
+
+  return 0;
 }
