@@ -68,13 +68,17 @@ __global__ void mat_trans_smem_swizzle_kernel(float* input, int M, int N,
 
   if (row < M && col < N) {
     s_data[threadIdx.x][threadIdx.y ^ threadIdx.x] = input[row * N + col];
-    __syncthreads();
-    int n_col = blockIdx.y * blockDim.y + threadIdx.x;
-    int n_row = blockIdx.x * blockDim.x + threadIdx.y;
-    if (n_row < N && n_col < M) {
-      output[n_row * M + n_col] =
-          s_data[threadIdx.y][threadIdx.x ^ threadIdx.y];
-    }
+  } else {
+    s_data[threadIdx.x][threadIdx.y ^ threadIdx.x] = 0.0f;
+  }
+  __syncthreads();
+  int n_col = blockIdx.y * blockDim.y + threadIdx.x;
+  int n_row = blockIdx.x * blockDim.x + threadIdx.y;
+  // printf("%d %d, %d %d, %d %d %d\n", row, col,
+  //        threadIdx.y, threadIdx.x, threadIdx.x, threadIdx.y ^ threadIdx.x, threadIdx.x ^ threadIdx.y);
+  if (n_row < N && n_col < M) {
+    output[n_row * M + n_col] =
+        s_data[threadIdx.y][threadIdx.x ^ threadIdx.y];
   }
 }
 
@@ -96,8 +100,8 @@ void launch_transposeSharedMem(float* input, float* output, int ROW, int COL) {
 }
 
 int main() {
-  int row = 76800;  // 矩阵列数
-  int col = 7680;   // 矩阵行数
+  int row = 1024;  // 矩阵行数
+  int col = 1024;   // 矩阵列数
 
   UnifiedPtr<float> input(row * col, DEVICE::CPU);
   UnifiedPtr<float> output_naive(col * row, DEVICE::CUDA);

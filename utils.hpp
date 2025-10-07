@@ -220,14 +220,23 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, i
   }
   A.to(DEVICE::CUDA);
   B.to(DEVICE::CUDA);
-  auto st = std::chrono::high_resolution_clock::now();
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  cudaEventRecord(start);
   for (int i = 0; i < repeats; i++) {
     func(A.get(), B.get(), C.get(), M, N, K);
   }
-  auto ed = std::chrono::high_resolution_clock::now();
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
 
-  double elapsed_ms = std::chrono::duration<double, std::milli>(ed - st).count() /
-                      static_cast<double>(repeats);
+  float elapsed_ms;
+  cudaEventElapsedTime(&elapsed_ms, start, stop);
+  elapsed_ms /= static_cast<double>(repeats);
+
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
 
   // 计算TFLOPS: 2*M*N*K (乘加操作) / 时间(秒) / 1e12
   double tflops = (2.0 * M * N * K) / (elapsed_ms * 1e-3) / 1e12;

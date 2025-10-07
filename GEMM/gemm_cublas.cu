@@ -24,14 +24,15 @@ void cublas_sgemm(float *A, float *B, float *C, size_t M, size_t N, size_t K) {
   cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_32F,
                N, A, CUDA_R_32F, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F,
                CUBLAS_GEMM_DEFAULT);
-  cudaDeviceSynchronize();
+  // cudaDeviceSynchronize();
 }
 
 int main() {
-  constexpr int M = 1024, N = 5120, K = 10240;
+  constexpr int M = 5120, N = 5120, K = 5120;
+  constexpr int repeat = 10;
 
   printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
 
   // Benchmark naive sgemm
-  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm");
+  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeat);
 }
