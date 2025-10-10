@@ -29,13 +29,14 @@ void cublas_sgemm(float *A, float *B, float *C, size_t M, size_t N, size_t K) {
 
 void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
-  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm warp up run", repeats);
+  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm warp up run",
+                 repeats / 5);
   benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeats);
 }
 
 int main() {
-  constexpr int repeats = 100;
-  std::vector<int> shape = {4096, 8192, 4096 * 3};
+  constexpr int repeats = 50;
+  std::vector<int> shape = {4096, 8192};
   // std::vector<int> shape = {5120};
   for (auto M : shape) {
     for (auto N : shape) {

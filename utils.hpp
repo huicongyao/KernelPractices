@@ -208,7 +208,8 @@ void benchmark(Func func, int N, std::string prefix) {
 }
 
 template <typename Func, typename T = float>
-void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, int repeats = 10) {
+void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix,
+                    int repeats = 10) {
   UnifiedPtr<T> A(M * K, DEVICE::CPU);
   UnifiedPtr<T> B(K * N, DEVICE::CPU);
   UnifiedPtr<T> C(M * N, DEVICE::CUDA);
@@ -241,7 +242,8 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, i
   // 计算TFLOPS: 2*M*N*K (乘加操作) / 时间(秒) / 1e12
   double tflops = (2.0 * M * N * K) / (elapsed_ms * 1e-3) / 1e12;
 
-  printf("TEST: %-60s: %8.3f ms, %7.2f TFLOPS\n", prefix.c_str(), elapsed_ms, tflops);
+  printf("TEST: %-60s: %8.3f ms, %7.2f TFLOPS\n", prefix.c_str(), elapsed_ms,
+         tflops);
 
   // Test correctness
   C.to(DEVICE::CPU);
@@ -256,7 +258,6 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix, i
       return;
     }
   }
-
 }
 
 #endif  // TEST_UTILS_HPP
