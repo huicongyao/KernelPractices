@@ -1,6 +1,8 @@
 #ifndef TEST_UTILS_HPP
 #define TEST_UTILS_HPP
 #include <cuda.h>
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
 #include <atomic>
@@ -196,6 +198,24 @@ class UnifiedPtr {
   bool unique() const { return use_count() == 1; }
 };
 
+// Primary template definition
+template <typename T>
+__device__ __host__ __forceinline__ T ConvertDtype(float val) {
+  return static_cast<T>(val);
+}
+
+// Specialized versions
+template <>
+__device__ __host__ __forceinline__ __nv_bfloat16
+ConvertDtype<__nv_bfloat16>(float val) {
+  return __float2bfloat16(val);
+}
+
+template <>
+__device__ __host__ __forceinline__ half ConvertDtype<half>(float val) {
+  return __float2half(val);
+}
+
 template <typename Func, typename T = float>
 void benchmark(Func func, int N, std::string prefix) {
   UnifiedPtr<T> x(N, DEVICE::CUDA);
@@ -212,12 +232,12 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix,
                     int repeats = 10) {
   UnifiedPtr<T> A(M * K, DEVICE::CPU);
   UnifiedPtr<T> B(K * N, DEVICE::CPU);
-  UnifiedPtr<T> C(M * N, DEVICE::CUDA);
+  UnifiedPtr<float> C(M * N, DEVICE::CUDA);
   for (int i = 0; i < M * K; i++) {
-    A[i] = static_cast<T>(0.5);
+    A[i] = ConvertDtype<T>(0.5f);
   }
   for (int i = 0; i < K * N; i++) {
-    B[i] = static_cast<T>(2.0);
+    B[i] = ConvertDtype<T>(2.0f);
   }
   A.to(DEVICE::CUDA);
   B.to(DEVICE::CUDA);

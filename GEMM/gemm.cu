@@ -755,20 +755,21 @@ void launch_sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel(
 void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
 
-  benchmark_gemm(launch_sgemm_naive_f32, M, N, K, "cuda sgemm_naive_f32",
-                 repeats);
+  // benchmark_gemm(launch_sgemm_naive_f32, M, N, K, "cuda sgemm_naive_f32",
+  //                repeats);
 
-  benchmark_gemm(launch_sgemm_sliced_k_f32, M, N, K, "cuda sgemm_sliced_k_f32",
-                 repeats);
+  // benchmark_gemm(launch_sgemm_sliced_k_f32, M, N, K, "cuda
+  // sgemm_sliced_k_f32",
+  //                repeats);
 
-  benchmark_gemm(launch_sgemm_sliced_k_f32_dbuf_kernel, M, N, K,
-                 "cuda sgemm_sliced_k_f32_dbuf_kernel", repeats);
+  // benchmark_gemm(launch_sgemm_sliced_k_f32_dbuf_kernel, M, N, K,
+  //                "cuda sgemm_sliced_k_f32_dbuf_kernel", repeats);
 
-  benchmark_gemm(launch_sgemm_sliced_k_f32x4_dbuf_kernel, M, N, K,
-                 "cuda sgemm_sliced_k_f32x4_dbuf_kernel", repeats);
+  // benchmark_gemm(launch_sgemm_sliced_k_f32x4_dbuf_kernel, M, N, K,
+  //                "cuda sgemm_sliced_k_f32x4_dbuf_kernel", repeats);
 
-  benchmark_gemm(launch_sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel, M, N, K,
-                 "cuda sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel", repeats);
+  // benchmark_gemm(launch_sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel, M, N, K,
+  //                "cuda sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel", repeats);
 
   benchmark_gemm(launch_sgemm_t_8x8_sliced_k_f32x4_kernel, M, N, K,
                  "cuda sgemm_t_8x8_sliced_k_f32x4_kernel", repeats);
@@ -781,7 +782,7 @@ void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
 }
 
 int main() {
-  constexpr int repeats = 1;
+  constexpr int repeats = 10;
   // std::vector<int> shape = {4096, 8192};
   std::vector<int> shape = {5120};
   for (auto M : shape) {

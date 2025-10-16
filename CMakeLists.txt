@@ -38,7 +38,7 @@ add_executable(
     utils.hpp
 )
 
-add_executable(gemm_tensor_core GEMM/gemm_tensor_core.cu)
+# add_executable(gemm_tensor_core GEMM/gemm_tensor_core.cu)
 add_executable(gemv GEMM/gemv.cu utils.hpp)
 add_executable(gemm_cublas GEMM/gemm_cublas.cu)
 target_link_libraries(gemm_cublas cublas)
@@ -50,3 +50,6 @@ add_executable(relu relu.cu)
 add_executable(rope rope.cu)
 add_executable(rms_norm rms_norm.cu utils.hpp)
 add_executable(gpu_info gpu_info.cu)
+
+# 添加gemm_wmma_tf32可执行文件
+add_executable(gemm_wmma_tf32 GEMM/gemm_wmma_tf32.cu utils.hpp)

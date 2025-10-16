@@ -1,5 +1,10 @@
 # Detailed Benchmark Resutlts
 A: [M, K], B: [K, N], C[M, N]; M,N,K $\in$ {4096, 8192}
+
+性能分析以及代码的简要介绍见
+
+【ima笔记】GEMM优化 https://ima.qq.com/note/share/_AsfMruL9g6eLZsabVNiMw
+
 ```bash
 ./gemm
 Running GEMM benchmarks with M=4096, N=4096, K=4096
@@ -74,6 +79,35 @@ TEST: cuda sgemm_t_4x4_sliced_k_f32x4_dbuf_kernel                 :  171.402 ms,
 TEST: cuda sgemm_t_8x8_sliced_k_f32x4_kernel                      :  154.411 ms,    7.12 TFLOPS
 TEST: cuda sgemm_t_8x8_sliced_k_f32x4_bcf_kernel                  :  137.779 ms,    7.98 TFLOPS
 TEST: cuda sgemm_t_8x8_sliced_k_f32x4_bcf_dbuf_kernel             :  116.445 ms,    9.44 TFLOPS
+
+./gemm_wmma_tf32
+Running GEMM benchmarks with M=4096, N=4096, K=4096
+TEST: stemm_wmma_stages_async_kernel                              :   14.086 ms,    9.76 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   11.016 ms,   12.48 TFLOPS
+Running GEMM benchmarks with M=4096, N=4096, K=8192
+TEST: stemm_wmma_stages_async_kernel                              :   21.965 ms,   12.51 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   22.093 ms,   12.44 TFLOPS
+Running GEMM benchmarks with M=4096, N=8192, K=4096
+TEST: stemm_wmma_stages_async_kernel                              :   21.692 ms,   12.67 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   21.776 ms,   12.62 TFLOPS
+Running GEMM benchmarks with M=4096, N=8192, K=8192
+TEST: stemm_wmma_stages_async_kernel                              :   45.123 ms,   12.18 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   43.491 ms,   12.64 TFLOPS
+Running GEMM benchmarks with M=8192, N=4096, K=4096
+TEST: stemm_wmma_stages_async_kernel                              :   21.816 ms,   12.60 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   21.910 ms,   12.55 TFLOPS
+Running GEMM benchmarks with M=8192, N=4096, K=8192
+TEST: stemm_wmma_stages_async_kernel                              :   41.956 ms,   13.10 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   43.601 ms,   12.61 TFLOPS
+Running GEMM benchmarks with M=8192, N=8192, K=4096
+TEST: stemm_wmma_stages_async_kernel                              :   44.292 ms,   12.41 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   44.347 ms,   12.40 TFLOPS
+Running GEMM benchmarks with M=8192, N=8192, K=8192
+TEST: stemm_wmma_stages_async_kernel                              :   88.773 ms,   12.39 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :   93.360 ms,   11.78 TFLOPS
+Running GEMM benchmarks with M=16384, N=16384, K=16384
+TEST: stemm_wmma_stages_async_kernel                              :  729.851 ms,   12.05 TFLOPS
+TEST: stemm_wmma_stages_async_dsmem_kernel                        :  724.184 ms,   12.15 TFLOPS
 ```
 
 #### [Reference]
