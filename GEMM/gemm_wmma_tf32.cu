@@ -22,9 +22,6 @@ using namespace nvcuda;
 #define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
 #define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
 #define BFLOAT2(value) (reinterpret_cast<__nv_bfloat162 *>(&(value))[0])
-#define LDST32BITS(value) (reinterpret_cast<half2 *>(&(value))[0])
-#define LDST64BITS(value) (reinterpret_cast<float2 *>(&(value))[0])
-#define LDST128BITS(value) (reinterpret_cast<float4 *>(&(value))[0])
 #define CP_ASYNC_COMMIT_GROUP() asm volatile("cp.async.commit_group;\n" ::)
 #define CP_ASYNC_WAIT_ALL() asm volatile("cp.async.wait_all;\n" ::)
 #define CP_ASYNC_WAIT_GROUP(n) \
@@ -46,10 +43,11 @@ using namespace nvcuda;
 HOST_DEVICE_INLINE
 int div_ceil(int a, int b) { return (a % b != 0) ? (a / b + 1) : (a / b); }
 
-__global__ void f32x4_tf32x4_kernel(float *x, float *y, int N) {
+__global__ void f32x4_tf32x4_kernel(const float *__restrict__ x,
+                                    float *__restrict__ y, int N) {
   int idx = (blockIdx.x * blockDim.x + threadIdx.x) * 4;
   if (idx < N) {
-    float4 reg_x = FLOAT4(x[idx]);
+    float4 reg_x = __ldg(reinterpret_cast<const float4 *>(&x[idx]));
     float4 reg_y;
     reg_y.x = wmma::__float_to_tf32(reg_x.x);
     reg_y.y = wmma::__float_to_tf32(reg_x.y);
@@ -234,18 +232,12 @@ template <const int WMMA_M = 16, const int WMMA_N = 16, const int WMMA_K = 8,
           const bool BLOCK_SWIZZLE = false>
 __global__ void sgemm_wmma_m16n16k8_mma4x2_warp2x4_stages_dsmem_kernel(
     float *A, float *B, float *C, int M, int N, int K) {
-  // 256 threads(8 warps) per block.
-  // const int bx = blockIdx.x;
-  // BLOCK_SWIZZLE 0/1 控制是否使用 block swizzle
   const int bx = ((int)BLOCK_SWIZZLE) * blockIdx.z * gridDim.x + blockIdx.x;
   const int by = blockIdx.y;
   const int NUM_K_TILES = div_ceil(K, WMMA_K);
   constexpr int BM = WMMA_M * WMMA_TILE_M * WARP_TILE_M; // 16x4*2=128
   constexpr int BN = WMMA_N * WMMA_TILE_N * WARP_TILE_N; // 16x2*4=128
   constexpr int BK = WMMA_K;                             // 8
-  // s2: 2*128*(8+4)*4=12KB, 2*8*(128+4)*4=8.25KB,   ~21KB
-  // s3: 3*128*(8+4)*4=18KB, 3*8*(128+4)*4=12.375KB, ~31KB
-  // s4: 4*128*(8+4)*4=24KB, 4*8*(128+4)*4=16.5KB,   ~41KB
   extern __shared__ float smem[];
   float *s_a = smem;
   float *s_b = smem + K_STAGE * BM * (BK + A_PAD);
@@ -258,18 +250,10 @@ __global__ void sgemm_wmma_m16n16k8_mma4x2_warp2x4_stages_dsmem_kernel(
   const int warp_m = warp_id / 2;      // 0,1,2,3
   const int warp_n = warp_id % 2;      // 0,1
 
-  // 先计算shared memory中的索引
-  // tid和需要加载的smem s_a[BM][BK] 之间的索引关系 BM=128 BK=8 按行读取 A行主序
-  // 对于s_a每行8个数据，每个线程读取4个，需要2个线程；总共128行，需要128x2刚好256线程
   int load_smem_a_m = tid / 2;                // row 0~127
   int load_smem_a_k = (tid % 2 == 0) ? 0 : 4; // col 0,4
-  // tid和需要加载的smem s_b[BK][BN] 之间的索引关系 BK=8 BN=128 按行读取 B行主序
-  // 对于s_b每行128个数据，每个线程读4个数据，需要32个线程；总共8行，需要32x8=256个线程
   int load_smem_b_k = tid / 32;       // row 0~7
   int load_smem_b_n = (tid % 32) * 4; // col 0,4,...,124,...
-  // 再计算全局内存中的索引
-  // 要加载到s_a中的元素对应到A全局内存中的行数
-  // 每个block负责出C中大小为BM*BN的块
   int load_gmem_a_m = by * BM + load_smem_a_m; // global row of a and c
   int load_gmem_b_n = bx * BN + load_smem_b_n; // global col of b and c
 
@@ -381,12 +365,11 @@ __global__ void sgemm_wmma_m16n16k8_mma4x2_warp2x4_stages_dsmem_kernel(
     __syncthreads();
   }
 
-  // make sure all memory issues ready.
   if ((K_STAGE - 2) > 0) {
     CP_ASYNC_WAIT_GROUP(0);
     __syncthreads();
   }
-  // processing last (K_STAGE-1) k iters.
+
   {
 #pragma unroll
     for (int k = 0; k < (K_STAGE - 1); k++) {
@@ -449,8 +432,8 @@ void launch_sgemm_wmma_m16n16k8_mma4x2_warp2x4_stages_kernel(
   const int Nb = K * N;
   constexpr int T = 256;
 
-  // f32x4_tf32x4_kernel<<<(Na + T * 4 - 1) / (T * 4), T>>>(a, a, Na);
-  // f32x4_tf32x4_kernel<<<(Nb + T * 4 - 1) / (T * 4), T>>>(b, b, Nb);
+  f32x4_tf32x4_kernel<<<(Na + T * 4 - 1) / (T * 4), T>>>(a, a, Na);
+  f32x4_tf32x4_kernel<<<(Nb + T * 4 - 1) / (T * 4), T>>>(b, b, Nb);
 
   constexpr int WMMA_M = 16;
   constexpr int WMMA_N = 16;
@@ -481,8 +464,8 @@ void launch_sgemm_wmma_m16n16k8_mma4x2_warp2x4_stages_dsmem_kernel(
   const int Nb = K * N;
   constexpr int T = 256;
 
-  // f32x4_tf32x4_kernel<<<(Na + T * 4 - 1) / (T * 4), T>>>(a, a, Na);
-  // f32x4_tf32x4_kernel<<<(Nb + T * 4 - 1) / (T * 4), T>>>(b, b, Nb);
+  f32x4_tf32x4_kernel<<<(Na + T * 4 - 1) / (T * 4), T>>>(a, a, Na);
+  f32x4_tf32x4_kernel<<<(Nb + T * 4 - 1) / (T * 4), T>>>(b, b, Nb);
 
   constexpr int WMMA_M = 16;
   constexpr int WMMA_N = 16;
