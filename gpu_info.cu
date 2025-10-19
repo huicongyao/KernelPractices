@@ -48,39 +48,23 @@ int main(void) {
     // Query tensor core information
     int tensor_cores_per_sm = 0;
 
-    // Use conditional compilation for different CUDA versions
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-        // For CUDA 10.0+ with proper compute capability
-        #if defined(cudaDevAttrTensorCoreCount)
-            cudaDeviceGetAttribute(&tensor_cores_per_sm, cudaDevAttrTensorCoreCount, device_id);
-        #else
-            // Fallback: estimate based on compute capability
-            if (prop.major == 7) {
-                tensor_cores_per_sm = 8;  // Volta and Turing
-            } else if (prop.major == 8) {
-                tensor_cores_per_sm = 4;  // Ampere
-            } else if (prop.major == 9) {
-                tensor_cores_per_sm = 4;  // Hopper
-            }
-        #endif
-    #else
-        // For older CUDA versions, estimate based on compute capability
-        if (prop.major == 7) {
-            tensor_cores_per_sm = 8;  // Volta and Turing
-        } else if (prop.major == 8) {
-            tensor_cores_per_sm = 4;  // Ampere
-        } else if (prop.major == 9) {
-            tensor_cores_per_sm = 4;  // Hopper
-        }
-    #endif
+    if (prop.major == 7) {
+      tensor_cores_per_sm = 8;  // Volta and Turing
+    } else if (prop.major == 8) {
+      tensor_cores_per_sm = 4;  // Ampere
+    } else if (prop.major == 9) {
+      tensor_cores_per_sm = 4;  // Hopper
+    }
 
-    printf("Number of tensor cores per SM:             %d\n", tensor_cores_per_sm);
+    printf("Number of tensor cores per SM:             %d\n",
+           tensor_cores_per_sm);
     printf("Total number of tensor cores:              %d\n",
            prop.multiProcessorCount * tensor_cores_per_sm);
 
     // Additional tensor core capabilities
     printf("Hardware supports tensor cores:            %s\n",
-           (prop.major >= 7) ? "Yes" : "No");  // Tensor cores introduced in Volta (7.0)
+           (prop.major >= 7) ? "Yes"
+                             : "No");  // Tensor cores introduced in Volta (7.0)
   }
 
   return 0;

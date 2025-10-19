@@ -27,7 +27,8 @@ void cublas_sgemm(float *A, float *B, float *C, size_t M, size_t N, size_t K) {
   // cudaDeviceSynchronize();
 }
 
-void cublas_sgemm_tf32(float *A, float *B, float *C, size_t M, size_t N, size_t K) {
+void cublas_sgemm_tf32(float *A, float *B, float *C, size_t M, size_t N,
+                       size_t K) {
   cublasHandle_t handle = nullptr;
   cublasCreate(&handle);
   cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH);
@@ -46,14 +47,13 @@ void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   //                repeats / 5);
   // benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeats);
 
-  benchmark_gemm(cublas_sgemm_tf32, M, N, K, "cublas_sgemm_tf32",
-                 repeats);
+  benchmark_gemm(cublas_sgemm_tf32, M, N, K, "cublas_sgemm_tf32", repeats);
 }
 
 int main() {
-  constexpr int repeats = 1;
-  // std::vector<int> shape = {4096, 8192};
-  std::vector<int> shape = {5120};
+  constexpr int repeats = 30;
+  std::vector<int> shape = {4096, 8192};
+  // std::vector<int> shape = {5120};
   for (auto M : shape) {
     for (auto N : shape) {
       for (auto K : shape) {
