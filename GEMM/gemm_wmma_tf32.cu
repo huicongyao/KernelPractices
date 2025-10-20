@@ -482,7 +482,7 @@ __global__ void sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel(
   const uint32_t smem_a_base_ptr = __cvta_generic_to_shared(s_a);
   const uint32_t smem_b_base_ptr = __cvta_generic_to_shared(s_b);
 
-#pragma unroll 4
+#pragma unroll
   for (int k = 0; k < (K_STAGE - 1);
        ++k) {  // 预备阶段的循环展开对性能的影响并不大
     int load_gmem_a_k = k * WMMA_K + load_smem_a_k;
@@ -512,7 +512,7 @@ __global__ void sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel(
   CP_ASYNC_WAIT_GROUP(K_STAGE - 2);
   __syncthreads();
 
-  // #pragma unroll
+#pragma unroll
   for (int k = (K_STAGE - 1); k < NUM_K_TILES; ++k) {
     int smem_sel = (k + 1) % K_STAGE;
     int smem_sel_next = k % K_STAGE;
@@ -542,31 +542,41 @@ __global__ void sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel(
 
     wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K,
                    wmma::precision::tf32, wmma::row_major>
-        A_frag[WARP_TILE_M];
+        A_frag[2];
     wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K,
                    wmma::precision::tf32, wmma::row_major>
-        B_frag[WARP_TILE_N];
+        B_frag[2];
+
 #pragma unroll
-    for (int i = 0; i < WARP_TILE_M; ++i) {
-      const int warp_smem_a_m = warp_m * (WMMA_M * WARP_TILE_M) + i * WMMA_M;
-      const float *load_smem_a_frag_ptr =
-          (s_a + smem_sel * s_a_stage_offset + warp_smem_a_m * (BK + A_PAD) +
-           0);  // BK=WMMA_K=8
-      wmma::load_matrix_sync(A_frag[i], load_smem_a_frag_ptr, BK + A_PAD);
-    }
+    for (int i_block = 0; i_block < WARP_TILE_M; i_block += 2) {
 #pragma unroll
-    for (int j = 0; j < WARP_TILE_N; ++j) {
-      const int warp_smem_b_n = warp_n * (WMMA_N * WARP_TILE_N) + j * WMMA_N;
-      const float *load_smem_b_frag_ptr =
-          (s_b + smem_sel * s_b_stage_offset + 0 * (BN + B_PAD) +
-           warp_smem_b_n);  // BK=WMMA_K=8
-      wmma::load_matrix_sync(B_frag[j], load_smem_b_frag_ptr, BN + B_PAD);
-    }
+      for (int j_block = 0; j_block < WARP_TILE_N; j_block += 2) {
 #pragma unroll
-    for (int i = 0; i < WARP_TILE_M; ++i) {
+        for (int i = 0; i < 2; ++i) {
+          const int warp_smem_a_m =
+              warp_m * (WMMA_M * WARP_TILE_M) + (i + i_block) * WMMA_M;
+          const float *load_smem_a_frag_ptr =
+              (s_a + smem_sel * s_a_stage_offset +
+               warp_smem_a_m * (BK + A_PAD) + 0);  // BK=WMMA_K=8
+          wmma::load_matrix_sync(A_frag[i], load_smem_a_frag_ptr, BK + A_PAD);
+        }
 #pragma unroll
-      for (int j = 0; j < WARP_TILE_N; ++j) {
-        wmma::mma_sync(C_frag[i][j], A_frag[i], B_frag[j], C_frag[i][j]);
+        for (int j = 0; j < 2; ++j) {
+          const int warp_smem_b_n =
+              warp_n * (WMMA_N * WARP_TILE_N) + (j + j_block) * WMMA_N;
+          const float *load_smem_b_frag_ptr =
+              (s_b + smem_sel * s_b_stage_offset + 0 * (BN + B_PAD) +
+               warp_smem_b_n);  // BK=WMMA_K=8
+          wmma::load_matrix_sync(B_frag[j], load_smem_b_frag_ptr, BN + B_PAD);
+        }
+#pragma unroll
+        for (int i = 0; i < 2; ++i) {
+#pragma unroll
+          for (int j = 0; j < 2; ++j) {
+            wmma::mma_sync(C_frag[i + i_block][j + j_block], A_frag[i],
+                           B_frag[j], C_frag[i + i_block][j + j_block]);
+          }
+        }
       }
     }
     CP_ASYNC_WAIT_GROUP(K_STAGE - 2);
@@ -585,38 +595,47 @@ __global__ void sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel(
       const int stage_sel = ((NUM_K_TILES - (K_STAGE - 1) + k) % K_STAGE);
       wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K,
                      wmma::precision::tf32, wmma::row_major>
-          A_frag[WARP_TILE_M];
+          A_frag[2];
       wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K,
                      wmma::precision::tf32, wmma::row_major>
-          B_frag[WARP_TILE_N];
+          B_frag[2];
+#pragma unroll
+      for (int i_block = 0; i_block < WARP_TILE_M; i_block += 2) {
+#pragma unroll
+        for (int j_block = 0; j_block < WARP_TILE_N; j_block += 2) {
+#pragma unroll
+          for (int i = 0; i < 2; ++i) {
+            const int warp_smem_a_m =
+                warp_m * (WMMA_M * WARP_TILE_M) + (i + i_block) * WMMA_M;
+            const float *load_smem_a_frag_ptr =
+                (s_a + stage_sel * s_a_stage_offset +
+                 warp_smem_a_m * (BK + A_PAD) + 0);  // BK=WMMA_K=8
+            wmma::load_matrix_sync(A_frag[i], load_smem_a_frag_ptr, BK + A_PAD);
+          }
 
 #pragma unroll
-      for (int i = 0; i < WARP_TILE_M; ++i) {
-        const int warp_smem_a_m = warp_m * (WMMA_M * WARP_TILE_M) + i * WMMA_M;
-        const float *load_smem_a_frag_ptr =
-            (s_a + stage_sel * s_a_stage_offset + warp_smem_a_m * (BK + A_PAD) +
-             0);  // BK=WMMA_K=8
-        wmma::load_matrix_sync(A_frag[i], load_smem_a_frag_ptr, BK + A_PAD);
-      }
+          for (int j = 0; j < 2; ++j) {
+            const int warp_smem_b_n =
+                warp_n * (WMMA_N * WARP_TILE_N) + (j + j_block) * WMMA_N;
+            const float *load_smem_b_frag_ptr =
+                (s_b + stage_sel * s_b_stage_offset + 0 * (BN + B_PAD) +
+                 warp_smem_b_n);  // BK=WMMA_K=8
+            wmma::load_matrix_sync(B_frag[j], load_smem_b_frag_ptr, BN + B_PAD);
+          }
 
 #pragma unroll
-      for (int j = 0; j < WARP_TILE_N; ++j) {
-        const int warp_smem_b_n = warp_n * (WMMA_N * WARP_TILE_N) + j * WMMA_N;
-        const float *load_smem_b_frag_ptr =
-            (s_b + stage_sel * s_b_stage_offset + 0 * (BN + B_PAD) +
-             warp_smem_b_n);  // BK=WMMA_K=8
-        wmma::load_matrix_sync(B_frag[j], load_smem_b_frag_ptr, BN + B_PAD);
-      }
-
+          for (int i = 0; i < 2; ++i) {
 #pragma unroll
-      for (int i = 0; i < WARP_TILE_M; ++i) {
-#pragma unroll
-        for (int j = 0; j < WARP_TILE_N; ++j) {
-          wmma::mma_sync(C_frag[i][j], A_frag[i], B_frag[j], C_frag[i][j]);
+            for (int j = 0; j < 2; ++j) {
+              wmma::mma_sync(C_frag[i + i_block][j + j_block], A_frag[i],
+                             B_frag[j], C_frag[i + i_block][j + j_block]);
+            }
+          }
         }
       }
     }
   }
+
 // finally, store bacn to C matrix.
 #pragma unroll
   for (int i = 0; i < WARP_TILE_M; ++i) {
@@ -757,9 +776,9 @@ void launch_sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel(
   constexpr int BN = WMMA_N * WMMA_TILE_N * WARP_TILE_N;
   [[maybe_unused]] constexpr int BK = WMMA_K;
   constexpr int stages =
-      5;  // 5~6 stages is sutable (but has register spilling)
+      6;  // 5~6 stages is sutable (but has register spilling)
   constexpr bool BLOCK_SWIZZLE = true;
-  const int swizzle_stride = (N / 4 / 128) * 128;
+  const int swizzle_stride = (N / 4 / 256) * 256;
 
   const int smem_max_size = (stages * BM * (BK + A_PAD) * sizeof(float) +
                              stages * BK * (BN + B_PAD) * sizeof(float));
@@ -801,13 +820,11 @@ void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
 
 int main() {
   constexpr int repeats = 30;
-  {
-    std::vector<int> shape = {4096, 8192};
-    for (auto M : shape) {
-      for (auto N : shape) {
-        for (auto K : shape) {
-          benchmark_group_gemm(M, N, K, repeats);
-        }
+  std::vector<int> shape = {4096, 8192};
+  for (auto M : shape) {
+    for (auto N : shape) {
+      for (auto K : shape) {
+        benchmark_group_gemm(M, N, K, repeats);
       }
     }
   }
