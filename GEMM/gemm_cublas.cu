@@ -45,7 +45,7 @@ void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   printf("Running GEMM benchmarks with M=%d, N=%d, K=%d\n", M, N, K);
   // benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm warp up run",
   //                repeats / 5);
-  // benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeats);
+  benchmark_gemm(cublas_sgemm, M, N, K, "cublas_sgemm", repeats);
 
   benchmark_gemm(cublas_sgemm_tf32, M, N, K, "cublas_sgemm_tf32", repeats);
 }
@@ -61,6 +61,6 @@ int main() {
       }
     }
   }
-
+  benchmark_group_gemm(5120, 5120, 5120, repeats);
   return 0;
 }
