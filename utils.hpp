@@ -15,12 +15,13 @@
 enum class DEVICE { CPU, CUDA };
 
 /**
- * @brief 控制块结构模板
+ * @brief Control block structure template
  *
- * 该结构用于管理资源的共享所有权和生命周期。它包含一个指向资源的指针、
- * 设备信息、资源大小以及一个引用计数，用于跟踪有多少共享者指向该资源。
+ * This structure is used to manage shared ownership and lifecycle of resources.
+ * It contains a pointer to the resource, device information, resource size,
+ * and a reference count to track how many shared owners point to this resource.
  *
- * @tparam T 资源的类型
+ * @tparam T Type of the resource
  */
 template <typename T>
 struct ControlBlock {
@@ -30,13 +31,14 @@ struct ControlBlock {
   std::atomic<int> ref_count;
 
   /**
-   * @brief 构造函数
+   * @brief Constructor
    *
-   * 初始化控制块，设置资源指针、大小和设备信息，并将引用计数初始化为1。
+   * Initializes the control block, setting the resource pointer, size,
+   * device information, and initializing the reference count to 1.
    *
-   * @param p 资源的指针
-   * @param s 资源的大小
-   * @param d_ 设备信息
+   * @param p Pointer to the resource
+   * @param s Size of the resource
+   * @param d_ Device information
    */
   ControlBlock(T* p, size_t s, DEVICE d_)
       : ptr(p), size(s), device(d_), ref_count(1) {}
@@ -72,23 +74,10 @@ class UnifiedPtr {
       : control(nullptr) {
     T* p = nullptr;
     if (device == DEVICE::CUDA) {
-      cudaError_t err = cudaMalloc(&p, _size * sizeof(T));
-      if (err != cudaSuccess) {
-        throw std::runtime_error("cudaMalloc failed: " +
-                                 std::string(cudaGetErrorString(err)));
-      }
-    } else {
-      p = new T[_size];
-    }
-    control = new ControlBlock<T>(p, _size, device);
-  }
-
-  // Constructor: Initializes memory based on whether CUDA memory is being used
-  __host__ UnifiedPtr(size_t _size, T val, DEVICE device = DEVICE::CPU)
-      : control(nullptr) {
-    T* p = nullptr;
-    if (device == DEVICE::CUDA) {
-      cudaError_t err = cudaMalloc(&p, _size * sizeof(T));
+      // round malloc size to 256
+      size_t malloc_size = _size * sizeof(T);
+      malloc_size = (malloc_size + 255) & ~255;
+      cudaError_t err = cudaMalloc(&p, malloc_size);
       if (err != cudaSuccess) {
         throw std::runtime_error("cudaMalloc failed: " +
                                  std::string(cudaGetErrorString(err)));
@@ -107,9 +96,9 @@ class UnifiedPtr {
 
   UnifiedPtr& operator=(const UnifiedPtr& other) {
     if (this != &other) {
-      // 释放当前资源
+      // Release current resources
       release();
-      // 复制新地控制块
+      // Copy the new control block
       control = other.control;
       if (control) {
         ++control->ref_count;
@@ -124,9 +113,9 @@ class UnifiedPtr {
 
   UnifiedPtr& operator=(UnifiedPtr&& other) noexcept {
     if (this != &other) {
-      // 释放当前资源
+      // Release current resources
       release();
-      // 转移控制块指针
+      // Transfer control block pointer
       control = other.control;
       other.control = nullptr;
     }
@@ -140,7 +129,10 @@ class UnifiedPtr {
     }
     if (device == DEVICE::CUDA && control->device == DEVICE::CPU) {
       T* new_p = nullptr;
-      cudaError_t err = cudaMalloc(&new_p, control->size * sizeof(T));
+      // round malloc size to 256
+      size_t malloc_size = control->size * sizeof(T);
+      malloc_size = (malloc_size + 255) & ~255;
+      cudaError_t err = cudaMalloc(&new_p, malloc_size);
       if (err != cudaSuccess) {
         throw std::runtime_error("cudaMalloc failed: " +
                                  std::string(cudaGetErrorString(err)));
@@ -199,21 +191,32 @@ class UnifiedPtr {
 };
 
 // Primary template definition
-template <typename T>
-__device__ __host__ __forceinline__ T ConvertDtype(float val) {
-  return static_cast<T>(val);
+template <typename in_Type = float, typename out_Type>
+__device__ __host__ __forceinline__ out_Type ConvertDtype(in_Type val) {
+  return static_cast<out_Type>(val);
 }
 
 // Specialized versions
 template <>
 __device__ __host__ __forceinline__ __nv_bfloat16
-ConvertDtype<__nv_bfloat16>(float val) {
+ConvertDtype<float, __nv_bfloat16>(float val) {
   return __float2bfloat16(val);
 }
 
 template <>
-__device__ __host__ __forceinline__ half ConvertDtype<half>(float val) {
+__device__ __host__ __forceinline__ half ConvertDtype<float, half>(float val) {
   return __float2half(val);
+}
+
+template <>
+__device__ __host__ __forceinline__ float ConvertDtype<half, float> (half val) {
+  return __half2float(val);
+}
+
+template <>
+__device__ __host__ __forceinline__ float ConvertDtype<__nv_bfloat16, float>(
+    __nv_bfloat16 val) {
+  return __bfloat162float(val);
 }
 
 template <typename Func, typename T = float>
@@ -234,10 +237,10 @@ void benchmark_gemm(Func func, int M, int N, int K, const std::string& prefix,
   UnifiedPtr<T> B(K * N, DEVICE::CPU);
   UnifiedPtr<float> C(M * N, DEVICE::CUDA);
   for (int i = 0; i < M * K; i++) {
-    A[i] = ConvertDtype<T>(0.5f);
+    A[i] = ConvertDtype<float, T>(0.5f);
   }
   for (int i = 0; i < K * N; i++) {
-    B[i] = ConvertDtype<T>(2.0f);
+    B[i] = ConvertDtype<float, T>(2.0f);
   }
   A.to(DEVICE::CUDA);
   B.to(DEVICE::CUDA);

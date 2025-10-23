@@ -9,7 +9,6 @@
 #include "utils.hpp"
 
 #define WARP_SIZE 32
-// 块大小（可调优参数）
 #define BLOCK_SIZE 256
 template <const int kWarpSize = WARP_SIZE>
 __device__ __forceinline__ float warp_reduce_sum_f32(float val) {
@@ -42,7 +41,7 @@ __global__ void block_all_reduce_sum_f32_f32_kernel(float* array, float* result,
 int main() {
   const int N = 1 << 20;  // 1M elements
   UnifiedPtr<float> array(N, DEVICE::CPU);
-  UnifiedPtr<float> result(2, DEVICE::CUDA);
+  UnifiedPtr<float> result(1, DEVICE::CUDA);
   // 初始化数据
   for (int i = 0; i < N; i++) {
     array[i] = static_cast<float>(rand() % 10);  // 测试用统一值
