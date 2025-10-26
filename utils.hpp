@@ -209,7 +209,7 @@ __device__ __host__ __forceinline__ half ConvertDtype<float, half>(float val) {
 }
 
 template <>
-__device__ __host__ __forceinline__ float ConvertDtype<half, float> (half val) {
+__device__ __host__ __forceinline__ float ConvertDtype<half, float>(half val) {
   return __half2float(val);
 }
 

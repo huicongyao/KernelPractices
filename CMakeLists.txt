@@ -16,7 +16,7 @@ set(CMAKE_CUDA_COMPILER  "/usr/local/cuda-12.4/bin/nvcc")
 set(CMAKE_PREFIX_PATH /home/yaohc/miniconda3/envs/vllm/lib/python3.12/site-packages/torch/share/cmake/)
 find_package(Torch REQUIRED)
 find_package(OpenMP REQUIRED)
- find_package(spdlog REQUIRED)
+find_package(spdlog REQUIRED)
 set(CMAKE_CUDA_ARCHITECTURES "89")
 
 add_executable(mat_trans

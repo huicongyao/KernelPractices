@@ -105,9 +105,10 @@ __device__ float block_reduce_max_f32(float val) {
 // one token per thread block, only support 64 <= h <= 1024 and 2^n
 // HEAD_SIZE/KV_LEN=NUM_THREADS
 // safe softmax per-token
-template <const int NUM_THREADS = 256/4>
+template <const int NUM_THREADS = 256 / 4>
 __global__ void safe_softmax_f32x4_per_token_kernel(const float *__restrict__ x,
-                                                    float *__restrict__ y, int N) {
+                                                    float *__restrict__ y,
+                                                    int N) {
   const int tid = threadIdx.x;
   const int idx = (blockIdx.x * blockDim.x + tid) * 4;
   float4 reg_x = __ldg(reinterpret_cast<const float4 *>(&x[idx]));
@@ -119,7 +120,7 @@ __global__ void safe_softmax_f32x4_per_token_kernel(const float *__restrict__ x,
   val = fmaxf(val, reg_x.y);
   val = fmaxf(val, reg_x.z);
   val = fmaxf(val, reg_x.w);
-  float max_val = block_reduce_max_f32<NUM_THREADS>(val); // block max
+  float max_val = block_reduce_max_f32<NUM_THREADS>(val);  // block max
   float4 reg_exp;
   reg_exp.x = (idx + 0 < N) ? __expf(reg_x.x - max_val) : 0.0f;
   reg_exp.y = (idx + 1 < N) ? __expf(reg_x.y - max_val) : 0.0f;
@@ -140,7 +141,7 @@ __global__ void safe_softmax_f32x4_per_token_kernel(const float *__restrict__ x,
 
 template <const int NUM_THREADS = 256>
 __global__ void safe_softmax_f16x8_pack_f32_per_token_kernel(
-    const half* __restrict__ x, half *y, int N) {
+    const half *__restrict__ x, half *y, int N) {
   const int tid = threadIdx.x;
   const int idx = (blockIdx.x * blockDim.x + tid) * 8;
   half pack_x[8], pack_y[8];
@@ -172,9 +173,9 @@ __global__ void safe_softmax_f16x8_pack_f32_per_token_kernel(
   // TODO(huicongyao): support non 8-multiple K here
 }
 
-template <const int NUM_THREADS = 256/4>
-__global__ void online_safe_softmax_f32x4_per_token_kernel(const float* __restrict__ x,
-                                                           float* __restrict__ y, int N) {
+template <const int NUM_THREADS = 256 / 4>
+__global__ void online_safe_softmax_f32x4_per_token_kernel(
+    const float *__restrict__ x, float *__restrict__ y, int N) {
   int local_tid = threadIdx.x;
   int global_tid = (blockIdx.x * NUM_THREADS + local_tid) * 4;
 
@@ -213,7 +214,9 @@ __global__ void online_safe_softmax_f32x4_per_token_kernel(const float* __restri
   }
 }
 
-void launch_safe_softmax_f32x4_per_token_kernel(const float* __restrict__ x, float *__restrict__ y, const int N, const int K) {
+void launch_safe_softmax_f32x4_per_token_kernel(const float *__restrict__ x,
+                                                float *__restrict__ y,
+                                                const int N, const int K) {
   if (K > 256) {
     throw(std::runtime_error("K must be less than 256"));
   }
@@ -224,7 +227,8 @@ void launch_safe_softmax_f32x4_per_token_kernel(const float* __restrict__ x, flo
   safe_softmax_f32x4_per_token_kernel<<<grid, block>>>(x, y, N * K);
 }
 
-void launch_safe_softmax_f16x8_pack_f32_per_token_kernel(const half* __restrict__ x, half *y, int N, int K) {
+void launch_safe_softmax_f16x8_pack_f32_per_token_kernel(
+    const half *__restrict__ x, half *y, int N, int K) {
   // assert(K <= 256 * 8 && "K must be less than 256 * 8");
   if (K > 256 * 8) {
     throw(std::runtime_error("K must be less than 256 * 8"));
@@ -232,11 +236,11 @@ void launch_safe_softmax_f16x8_pack_f32_per_token_kernel(const half* __restrict_
   dim3 grid(N);
   dim3 block((K + 7) / 8);
 
-  safe_softmax_f16x8_pack_f32_per_token_kernel<<<grid, block>>>(
-      x, y, N * K);
+  safe_softmax_f16x8_pack_f32_per_token_kernel<<<grid, block>>>(x, y, N * K);
 }
 
-void launch_online_safe_softmax_f32x4_per_token_kernel(const float* __restrict__ x, float* __restrict__ y, int N, int K) {
+void launch_online_safe_softmax_f32x4_per_token_kernel(
+    const float *__restrict__ x, float *__restrict__ y, int N, int K) {
   if (K > 256) {
     throw(std::runtime_error("K must be less than 256"));
   }
@@ -246,15 +250,16 @@ void launch_online_safe_softmax_f32x4_per_token_kernel(const float* __restrict__
 }
 
 // input:NxK, per token softmax, K <= 256
-template <typename Func, typename T=float>
-void benchmark_safe_softmax(Func fun, int N, int K, const std::string & prefix,
+template <typename Func, typename T = float>
+void benchmark_safe_softmax(Func fun, int N, int K, const std::string &prefix,
                             int repeats) {
   UnifiedPtr<T> input(N * K, DEVICE::CPU);
   UnifiedPtr<T> output(N * K, DEVICE::CUDA);
 
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < K; j++) {
-      input[i * K + j] = ConvertDtype<float, T>(static_cast<float>(j) * 10 * 1.0f / K);
+      input[i * K + j] =
+          ConvertDtype<float, T>(static_cast<float>(j) * 10 * 1.0f / K);
     }
   }
 
@@ -299,15 +304,18 @@ void benchmark_safe_softmax(Func fun, int N, int K, const std::string & prefix,
     - K divisions (each exponential divided by sum)
    */
   double gflops = static_cast<double>(N) * K * 4 / (elapsed_ms * 1e-3) / 1e9;
-  printf("TEST: %-60s: %8.3f ms, %7.2f GFLOPS\n", prefix.c_str(), elapsed_ms, gflops);
+  printf("TEST: %-60s: %8.3f ms, %7.2f GFLOPS\n", prefix.c_str(), elapsed_ms,
+         gflops);
 
   output.to(DEVICE::CPU);
   int error_cnt = 0;
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < K; j++) {
-      if (fabs(cpu_result[j] - ConvertDtype<T, float>(output[i * K + j])) > 1e-3) {
+      if (fabs(cpu_result[j] - ConvertDtype<T, float>(output[i * K + j])) >
+          1e-3) {
         if (error_cnt < 10) {
-          printf("Error at (%d, %d): %f vs %f\n", i, j, cpu_result[j], ConvertDtype<T, float>(output[i * K + j]));
+          printf("Error at (%d, %d): %f vs %f\n", i, j, cpu_result[j],
+                 ConvertDtype<T, float>(output[i * K + j]));
         }
         error_cnt++;
         break;
@@ -317,25 +325,23 @@ void benchmark_safe_softmax(Func fun, int N, int K, const std::string & prefix,
 }
 
 void benchmark_groups(int N, int K, int repeats) {
-  benchmark_safe_softmax<decltype(launch_safe_softmax_f32x4_per_token_kernel), float>
-      (launch_safe_softmax_f32x4_per_token_kernel, N, K,
-       "safe_softmax_f32x4_per_token_kernel", repeats);
-  benchmark_safe_softmax<decltype(launch_safe_softmax_f16x8_pack_f32_per_token_kernel), half>
-      (launch_safe_softmax_f16x8_pack_f32_per_token_kernel, N, K,
-       "safe_softmax_f16x8_pack_f32_per_token_kernel", repeats);
-  benchmark_safe_softmax<decltype(launch_online_safe_softmax_f32x4_per_token_kernel), float>
-      (launch_online_safe_softmax_f32x4_per_token_kernel, N, K,
-       "online_safe_softmax_f32x4_per_token_kernel", repeats);
+  benchmark_safe_softmax<decltype(launch_safe_softmax_f32x4_per_token_kernel),
+                         float>(launch_safe_softmax_f32x4_per_token_kernel, N,
+                                K, "safe_softmax_f32x4_per_token_kernel",
+                                repeats);
+  benchmark_safe_softmax<
+      decltype(launch_safe_softmax_f16x8_pack_f32_per_token_kernel), half>(
+      launch_safe_softmax_f16x8_pack_f32_per_token_kernel, N, K,
+      "safe_softmax_f16x8_pack_f32_per_token_kernel", repeats);
+  benchmark_safe_softmax<
+      decltype(launch_online_safe_softmax_f32x4_per_token_kernel), float>(
+      launch_online_safe_softmax_f32x4_per_token_kernel, N, K,
+      "online_safe_softmax_f32x4_per_token_kernel", repeats);
 }
 
 int main() {
   const int K = 256;
-  std::vector<int> N = {512,
-                        2048,
-                        4096,
-                        8192,
-                        16384
-                        };
+  std::vector<int> N = {512, 2048, 4096, 8192, 16384};
 
   for (int n : N) {
     benchmark_groups(n, K, 10000);
