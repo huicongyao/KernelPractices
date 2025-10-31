@@ -1346,8 +1346,8 @@ void benchmark_group_gemm(int M, int N, int K, int repeats = 10) {
   //                K, "stemm_wmma_stages_async_kernel", repeats);
   // benchmark_gemm(launch_sgemm_wmma_m16n16k8_mma4x2_warp2x4_stages_dsmem_kernel,
   //                M, N, K, "stemm_wmma_stages_async_dsmem_kernel", repeats);
-  benchmark_gemm(launch_gemm_wmma_tf32, M, N, K, "cutlass alike kernel",
-                 repeats);
+  // benchmark_gemm(launch_gemm_wmma_tf32, M, N, K, "cutlass alike kernel",
+  //                repeats);
   benchmark_gemm(
       launch_sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel, M, N, K,
       "sgemm_wmma_m16n16k8_mma2x2_warp4x4_stages_dsmem_kernel", repeats);
@@ -1363,7 +1363,7 @@ int main(int argc, char *argv[]) {
   if (mode == "profile") {
     benchmark_group_gemm(1024, 1024, 1024, 1);
   } else if (mode == "benchmark") {
-    constexpr int repeats = 30;
+    constexpr int repeats = 100;
     std::vector<int> shape = {4096, 8192};
     for (auto M : shape) {
       for (auto N : shape) {

@@ -8,6 +8,8 @@
 
 #include "utils.hpp"
 
+#define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
+
 __global__ void transposeNaive(float* input, float* output, int ROW, int COL) {
   int col_idx = blockIdx.x * blockDim.x + threadIdx.x;
   int row_idx = blockIdx.y * blockDim.y + threadIdx.y;
@@ -34,8 +36,8 @@ void launch_transposeNaive(float* input, float* output, int ROW, int COL) {
 template <const int TILE_DIM = 32>
 __global__ void transposeSharedMem(float* input, float* output, int ROW,
                                    int COL) {
-  __shared__ float tile[TILE_DIM]
-                       [TILE_DIM];  // Pad shared memory to avoid bank conflicts
+  // Pad shared memory to avoid bank conflicts
+  __shared__ float tile[TILE_DIM][TILE_DIM + 1];
   const int bx = blockIdx.x, by = blockIdx.y;
   const int tx = threadIdx.x, ty = threadIdx.y;
 
@@ -113,14 +115,80 @@ void launch_transposeSharedMemSwizzle(float* input, float* output, int ROW,
   }
 }
 
+
+
+template <const int TILE_DIM_y = 64, const int TILE_DIM_x = 16, const int PAD = 0>
+__global__ void mat_transpose_f32x4_shared_bcf_merge_write_row2col2d_kernel
+                (const float * __restrict__ x,
+                float * __restrict__ y,
+                const int row, const int col) {
+  const int global_x = blockIdx.x * blockDim.x + threadIdx.x;
+  const int global_y = blockIdx.y * blockDim.y + threadIdx.y;
+  const int local_x = threadIdx.x;
+  const int local_y = threadIdx.y;
+  __shared__ float tile[TILE_DIM_y][TILE_DIM_x + PAD];
+  if (global_y * 4 < row && global_x < col) {
+    float4 x_val;
+    x_val.x = x[global_y * 4 * col + global_x];
+    x_val.y = x[(global_y * 4 + 1) * col + global_x];
+    x_val.z = x[(global_y * 4 + 2) * col + global_x];
+    x_val.w = x[(global_y * 4 + 3) * col + global_x];
+    tile[local_y * 4][local_x] = x_val.x;
+    tile[local_y * 4 + 1][local_x] = x_val.y;
+    tile[local_y * 4 + 2][local_x] = x_val.z;
+    tile[local_y * 4 + 3][local_x] = x_val.w;
+    __syncthreads();
+
+    float4 smem_val;
+    smem_val.x = tile[local_x * 4][local_y];
+    smem_val.y = tile[local_x * 4 + 1][local_y];
+    smem_val.z = tile[local_x * 4 + 2][local_y];
+    smem_val.w = tile[local_x * 4 + 3][local_y];
+
+    const int gid_x = blockIdx.x * blockDim.x;
+    const int gid_y = blockIdx.y * blockDim.y * 4;
+    const int out_y = gid_y + local_x * 4;
+    const int out_x = gid_x + local_y;
+    reinterpret_cast<float4 *>(y)[(out_x * row + out_y) / 4] = FLOAT4(smem_val);
+  }
+}
+
+template <const int TILE_DIM_y = 64, const int TILE_DIM_x = 16, const int PAD = 0>
+void launch_mat_transpose_f32x4_shared_bcf_merge_write_row2col2d
+            (const float * __restrict__ input,
+             float * __restrict__ output,
+             const int row, const int col) {
+  // Block dimensions: TILE_DIM_x in x direction, TILE_DIM_y/4 in y direction
+  // because each thread processes 4 rows in the input matrix
+  constexpr int BLOCK_DIM_X = TILE_DIM_x;
+  constexpr int BLOCK_DIM_Y = TILE_DIM_y / 4;
+
+  // Grid dimensions: cover the entire matrix
+  // x direction: number of columns divided by block x dimension
+  // y direction: number of rows divided by (block y dimension * 4) since each thread processes 4 rows
+  dim3 grid((col + BLOCK_DIM_X - 1) / BLOCK_DIM_X,
+            (row + TILE_DIM_y - 1) / TILE_DIM_y);
+  dim3 block(BLOCK_DIM_X, BLOCK_DIM_Y);
+
+  mat_transpose_f32x4_shared_bcf_merge_write_row2col2d_kernel<TILE_DIM_y, TILE_DIM_x, PAD>
+      <<<grid, block>>>(input, output, row, col);
+
+  // Check for kernel launch errors
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    throw std::runtime_error("mat_transpose_f32x4_shared_bcf_merge_write_row2col2d kernel launch failed: " +
+                             std::string(cudaGetErrorString(err)));
+  }
+}
+
 template <typename Func, typename T = float>
 void benchmark_transpose(Func func, int row, int col, const std::string& prefix,
-                         int repeat = 10) {
+                         int repeats = 10) {
   UnifiedPtr<T> input(row * col, DEVICE::CPU);
   UnifiedPtr<T> output(col * row, DEVICE::CUDA);
   for (int i = 0; i < row; i++) {
     for (int j = 0; j < col; j++) {
-      input[i * col + j] = static_cast<T>(i * col + j);
+      input[i * col + j] = static_cast<T>(rand());
     }
   }
   input = input.to(DEVICE::CUDA);
@@ -129,14 +197,14 @@ void benchmark_transpose(Func func, int row, int col, const std::string& prefix,
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
   cudaEventRecord(start);
-  for (int i = 0; i < repeat; i++) {
+  for (int i = 0; i < repeats; i++) {
     func(input.get(), output.get(), row, col);
   }
   cudaEventRecord(stop);
   cudaEventSynchronize(stop);
   float elapsed_ms;
   cudaEventElapsedTime(&elapsed_ms, start, stop);
-  elapsed_ms /= static_cast<float>(repeat);
+  elapsed_ms /= static_cast<float>(repeats);
 
   cudaEventDestroy(start);
   cudaEventDestroy(stop);
@@ -159,20 +227,36 @@ void benchmark_transpose(Func func, int row, int col, const std::string& prefix,
   return;
 }
 
-int main() {
-  int row = 10240;  // Matrix rows
-  int col = 10240;  // Matrix columns
+void benchmark_transpose_all(const int M, const int N, const int repeats) {
+  printf("Transpose Benchmark with M=%d, N=%d\n", M, N);
+  benchmark_transpose(launch_transposeNaive, M, N, "Naive Transpose", repeats);
+  benchmark_transpose(launch_transposeSharedMem, M, N,
+                      "Shared Memory Transpose (padding)", repeats);
+  benchmark_transpose(launch_transposeSharedMemSwizzle, M, N,
+                      "Shared Memory Transpose (Swizzle)", repeats);
+  benchmark_transpose(launch_mat_transpose_f32x4_shared_bcf_merge_write_row2col2d<64, 16, 1>, M, N,
+                      "F32x4 Shared BCF Merge Write Row2Col2D", repeats);
+}
 
-  // Test naive transpose
-  benchmark_transpose(launch_transposeNaive, row, col, "Naive Transpose", 100);
+int main(int argc, char** argv) {
+  // get inputs from command line
+  if (argc < 2) {
+    printf("Usage: ./mat_trans [profile|benchmark]\n");
+    exit(1);
+  }
 
-  // Test shared memory transpose
-  benchmark_transpose(launch_transposeSharedMem, row, col,
-                      "Shared Memory Transpose", 100);
-
-  // Test shared memory transpose with swizzle
-  benchmark_transpose(launch_transposeSharedMemSwizzle, row, col,
-                      "Shared Memory Transpose (Swizzle)", 100);
+  std::string mode = argv[1];
+  if (mode == "profile") {
+    benchmark_transpose_all(5120, 5120, 1);
+  } else {
+    std::vector<int> shapes = {5120, 10240, 16384};
+    constexpr int repeats = 100;
+    for (auto M : shapes) {
+      for (auto N : shapes) {
+        benchmark_transpose_all(M, N, repeats);
+      }
+    }
+  }
 
   return 0;
 }
