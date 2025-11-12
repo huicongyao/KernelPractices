@@ -83,16 +83,16 @@ make
 
 详细的性能基准测试结果请参考：[`GEMM/detailed_benchmark.md`](GEMM/detailed_benchmark.md)
 
-### GEMM性能示例 (A100 GPU)
+### GEMM性能示例 (4060laptop GPU)
 - **朴素实现**: 0.53 TFLOPS
 - **优化实现**: 11.77 TFLOPS (22倍提升)
-- **Tensor Core**: 12.48 TFLOPS
+- **Tensor Core**: 12.07 TFLOPS
 
 ## 要求
 
-- CUDA Toolkit (12.4+)
+- CUDA Toolkit (12.0+)
 - CMake 3.0+
-- 支持C++11的C++编译器
+- 支持C++17的C++编译器
 - OpenMP (可选，用于CPU对比)
 
 ## 使用
